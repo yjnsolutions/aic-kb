@@ -46,3 +46,4 @@ cover/
 .DS_Store
 Thumbs.db
 .aider*
+docs/*
