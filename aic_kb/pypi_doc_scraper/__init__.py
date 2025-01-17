@@ -1,15 +1,22 @@
-import re
 import asyncio
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+import logging
+import re
 import urllib.parse
+from enum import Enum
 from pathlib import Path
 from typing import List, Optional
-from rich.progress import Progress, TaskID
-from enum import Enum
-from urllib.robotparser import RobotFileParser
 from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 import requests
+from bs4 import BeautifulSoup
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
+from rich.progress import Progress, TaskID
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 async def crawl_parallel(urls: List[str], max_concurrent: int = 5):
@@ -19,7 +26,11 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 5):
         verbose=False,
         extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
     )
-    crawl_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+    crawl_config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        wait_for="css:nav",       # Wait for navigation to load
+        page_timeout=5000,        # Wait 5 seconds for JavaScript
+    )
 
     # Create the crawler instance
     crawler = AsyncWebCrawler(config=browser_config)
@@ -35,11 +46,7 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 5):
 
             async def process_url(url: str):
                 async with semaphore:
-                    result = await crawler.arun(
-                        url=url,
-                        config=crawl_config,
-                        session_id="session1"
-                    )
+                    result = await crawler.arun(url=url, config=crawl_config, session_id="session1")
                     if result.success:
                         print(f"Successfully crawled: {url}")
                         # Pass progress and task_id here
@@ -75,7 +82,7 @@ async def process_and_store_document(url: str, content: str, progress: Progress,
     parsed = urllib.parse.urlparse(url)
     filename = re.sub(r"[^\w\-_]", "_", parsed.path + "_" + parsed.query + "_" + parsed.fragment).strip("_")
 
-    # remove leading and trailing underscores
+    # Remove leading and trailing underscores
     filename = filename.strip("_")
 
     if not filename:
@@ -85,23 +92,25 @@ async def process_and_store_document(url: str, content: str, progress: Progress,
     output_path = output_dir / f"{filename}.md"
     output_path.write_text(content)
 
+
 class CrawlStrategy(Enum):
     BFS = "bfs"
     DFS = "dfs"
 
+
 async def crawl_recursive(
     start_url: str,
-    depth: int,
+    depth: Optional[int],
     strategy: CrawlStrategy,
     robot_parser: Optional[RobotFileParser] = None,
-    max_concurrent: int = 5
+    max_concurrent: int = 5,
 ) -> set[str]:
     """
     Recursively crawl a website starting from a URL.
 
     Args:
         start_url: Starting URL to crawl from
-        depth: Maximum recursion depth
+        depth: Maximum recursion depth (None for unlimited)
         strategy: BFS or DFS crawling strategy
         robot_parser: RobotFileParser instance for robots.txt rules
         max_concurrent: Maximum number of concurrent requests
@@ -109,68 +118,124 @@ async def crawl_recursive(
     Returns:
         Set of successfully crawled URLs
     """
+    logger.info(
+        f"Starting recursive crawl of {start_url} with depth={'unlimited' if depth is None else depth}, strategy={strategy.value}"
+    )
+
     browser_config = BrowserConfig(
         headless=True,
         verbose=False,
         extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
     )
-    crawl_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+    crawl_config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        wait_for="css:nav",       # Wait for the navigation menu to load
+        page_timeout=5000,        # Wait 5 seconds for JavaScript rendering
+    )
     crawler = AsyncWebCrawler(config=browser_config)
+    logger.debug("Initializing web crawler")
     await crawler.start()
 
     try:
         crawled_urls = set()
         to_crawl = [(start_url, 0)]  # (url, depth)
         base_domain = urlparse(start_url).netloc
+        logger.info(f"Base domain: {base_domain}")
 
         semaphore = asyncio.Semaphore(max_concurrent)
+        logger.debug(f"Set concurrency limit to {max_concurrent}")
 
         while to_crawl:
             current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
-            if current_depth > depth:
+            if depth is not None and current_depth > depth:
+                logger.debug(f"Skipping {current_url}: max depth reached")
                 continue
 
             if current_url in crawled_urls:
+                logger.debug(f"Skipping {current_url}: already crawled")
                 continue
 
             # Check if URL is allowed by robots.txt
             if robot_parser and not robot_parser.can_fetch("*", current_url):
+                logger.info(f"Skipping {current_url}: blocked by robots.txt")
                 continue
 
             # Stay within same domain
             if urlparse(current_url).netloc != base_domain:
+                logger.debug(f"Skipping {current_url}: outside base domain")
                 continue
 
             async with semaphore:
-                result = await crawler.arun(
-                    url=current_url,
-                    config=crawl_config,
-                    session_id="session1"
-                )
+                logger.debug(f"Crawling {current_url} at depth {current_depth}")
+                result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
 
                 if result.success:
+                    logger.info(f"Successfully crawled: {current_url}")
+                    logger.debug(f"Page content: {result.html}")
                     crawled_urls.add(current_url)
                     with Progress() as progress:
                         task_id = progress.add_task(f"Processing {current_url}", total=1)
-                        await process_and_store_document(current_url, result.markdown_v2.raw_markdown, progress, task_id)
+                        await process_and_store_document(
+                            current_url, result.markdown_v2.raw_markdown, progress, task_id
+                        )
 
-                    # Extract and normalize new URLs from the page
-                    for link in result.links:
-                        normalized_url = urljoin(current_url, link)
-                        if normalized_url not in crawled_urls:
+                    # Parse the HTML content with BeautifulSoup
+                    soup = BeautifulSoup(result.html, 'html.parser')
+
+                    # Find all anchor tags with href attribute
+                    links = soup.find_all('a', href=True)
+
+                    logger.info(f"Found {len(links)} links on {current_url}")
+                    new_links = 0
+
+                    for tag in links:
+                        href = tag['href']
+                        logger.debug(f"Original href: {href}")
+
+                        # Skip empty links and fragment-only links
+                        if not href or href.startswith('#'):
+                            continue
+
+                        # Handle relative links properly
+                        normalized_url = urljoin(current_url, href.strip())
+                        # Remove URL fragments to avoid duplicates
+                        normalized_url = normalized_url.split('#')[0]
+
+                        # Verify this is a valid URL and within the same domain
+                        parsed_url = urlparse(normalized_url)
+                        if not parsed_url.scheme or not parsed_url.netloc:
+                            logger.debug(f"Skipping invalid URL: {normalized_url}")
+                            continue
+
+                        if parsed_url.netloc != base_domain:
+                            logger.debug(f"Skipping external URL: {normalized_url}")
+                            continue
+
+                        if normalized_url not in crawled_urls and normalized_url not in [url for url, _ in to_crawl]:
                             to_crawl.append((normalized_url, current_depth + 1))
+                            new_links += 1
+                            logger.debug(f"Added to crawl queue: {normalized_url}")
 
+                    logger.info(f"Found {new_links} new links on {current_url}")
+                else:
+                    logger.error(
+                        f"Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                    )
+
+        logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
         return crawled_urls
     finally:
         await crawler.close()
+        logger.debug("Crawler closed")
+
 
 async def _get_package_documentation(
     package_name: str,
     version: Optional[str] = None,
-    depth: int = 3,
+    depth: Optional[int] = None,
     strategy: str = "bfs",
-    ignore_robots: bool = False
+    ignore_robots: bool = False,
 ) -> None:
     """
     Get documentation for a Python package.
@@ -178,15 +243,22 @@ async def _get_package_documentation(
     Args:
         package_name: Name of the package
         version: Optional version string
-        depth: Maximum recursion depth
+        depth: Maximum recursion depth (None for unlimited)
         strategy: Crawling strategy ('bfs' or 'dfs')
         ignore_robots: Whether to ignore robots.txt rules
     """
+    logger.info(
+        f"Getting documentation for package {package_name}"
+        + (f" version {version}" if version else "")
+        + f" with {'unlimited' if depth is None else depth} depth"
+    )
+
     # Get package info from PyPI
     pypi_url = f"https://pypi.org/pypi/{package_name}/json"
     if version:
         pypi_url = f"https://pypi.org/pypi/{package_name}/{version}/json"
 
+    logger.debug(f"Fetching package info from {pypi_url}")
     response = requests.get(pypi_url)
     response.raise_for_status()
 
@@ -195,20 +267,26 @@ async def _get_package_documentation(
     documentation_url = project_urls.get("Documentation") or data["info"].get("documentation_url")
 
     if not documentation_url:
+        logger.error(f"No documentation URL found for {package_name}")
         raise ValueError(f"No documentation URL found for {package_name}")
+
+    logger.info(f"Documentation URL: {documentation_url}")
 
     # Set up robots.txt parser
     robot_parser = None
     if not ignore_robots:
         robot_parser = RobotFileParser()
         robots_url = urljoin(documentation_url, "/robots.txt")
+        logger.debug(f"Checking robots.txt at {robots_url}")
         robot_parser.set_url(robots_url)
         try:
             robot_parser.read()
+            logger.info("Successfully read robots.txt")
         except Exception as e:
-            print(f"Warning: Could not read robots.txt: {e}")
+            logger.warning(f"Could not read robots.txt: {e}")
             robot_parser = None
 
     # Run recursive crawler
     crawl_strat = CrawlStrategy.BFS if strategy.lower() == "bfs" else CrawlStrategy.DFS
+    logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
     await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser)
