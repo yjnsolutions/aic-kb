@@ -13,11 +13,11 @@ def hello(name: str):
 
 @app.command()
 def get_package_documentation(
-    package_name: str, 
+    package_name: str,
     version: Optional[str] = None,
-    depth: int = typer.Option(3, help="Maximum recursion depth for crawling"),
+    depth: Optional[int] = typer.Option(None, help="Maximum recursion depth for crawling (None for unlimited)"),
     strategy: str = typer.Option("bfs", help="Crawling strategy: 'bfs' or 'dfs'"),
-    ignore_robots: bool = typer.Option(False, help="Ignore robots.txt rules")
+    ignore_robots: bool = typer.Option(False, help="Ignore robots.txt rules"),
 ):
     """
     Scrape documentation for a Python package and save as markdown files.
