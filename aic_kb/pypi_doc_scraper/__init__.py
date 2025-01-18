@@ -4,61 +4,18 @@ import re
 import urllib.parse
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
-from bs4 import BeautifulSoup
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from rich.progress import Progress, TaskID
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-
-async def crawl_parallel(urls: List[str], max_concurrent: int = 5):
-    """Crawl multiple URLs in parallel with a concurrency limit."""
-    browser_config = BrowserConfig(
-        headless=True,
-        verbose=False,
-        extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
-    )
-    crawl_config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        wait_for="css:nav",       # Wait for navigation to load
-        page_timeout=5000,        # Wait 5 seconds for JavaScript
-    )
-
-    # Create the crawler instance
-    crawler = AsyncWebCrawler(config=browser_config)
-    await crawler.start()
-
-    try:
-        # Create a semaphore to limit concurrency
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        with Progress() as progress:
-            # Create the main task
-            overall_task = progress.add_task("[cyan]Crawling documentation...", total=len(urls))
-
-            async def process_url(url: str):
-                async with semaphore:
-                    result = await crawler.arun(url=url, config=crawl_config, session_id="session1")
-                    if result.success:
-                        print(f"Successfully crawled: {url}")
-                        # Pass progress and task_id here
-                        await process_and_store_document(url, result.markdown_v2.raw_markdown, progress, overall_task)
-                    else:
-                        print(f"Failed: {url} - Error: {result.error_message}")
-                    progress.update(overall_task, advance=1)
-
-            # Process all URLs in parallel with limited concurrency
-            await asyncio.gather(*[process_url(url) for url in urls])
-    finally:
-        await crawler.close()
+logger.setLevel(logging.INFO)
 
 
 async def process_and_store_document(url: str, content: str, progress: Progress, task_id: TaskID) -> None:
@@ -129,105 +86,80 @@ async def crawl_recursive(
     )
     crawl_config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
-        wait_for="css:nav",       # Wait for the navigation menu to load
-        page_timeout=5000,        # Wait 5 seconds for JavaScript rendering
     )
-    crawler = AsyncWebCrawler(config=browser_config)
-    logger.debug("Initializing web crawler")
-    await crawler.start()
 
-    try:
+    logger.debug("Initializing web crawler")
+    async with AsyncWebCrawler(config=browser_config) as crawler:
         crawled_urls = set()
         to_crawl = [(start_url, 0)]  # (url, depth)
         base_domain = urlparse(start_url).netloc
         logger.info(f"Base domain: {base_domain}")
 
         semaphore = asyncio.Semaphore(max_concurrent)
-        logger.debug(f"Set concurrency limit to {max_concurrent}")
+        logger.info(f"Set concurrency limit to {max_concurrent}")
 
-        while to_crawl:
-            current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
+        with Progress() as progress:
+            # Initialize progress with current known URLs
+            task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
+            
+            while to_crawl:
+                current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
-            if depth is not None and current_depth > depth:
-                logger.debug(f"Skipping {current_url}: max depth reached")
-                continue
+                if depth is not None and current_depth > depth:
+                    logger.info(f"Skipping {current_url}: max depth reached")
+                    continue
 
-            if current_url in crawled_urls:
-                logger.debug(f"Skipping {current_url}: already crawled")
-                continue
+                if current_url in crawled_urls:
+                    logger.info(f"Skipping {current_url}: already crawled")
+                    continue
 
-            # Check if URL is allowed by robots.txt
-            if robot_parser and not robot_parser.can_fetch("*", current_url):
-                logger.info(f"Skipping {current_url}: blocked by robots.txt")
-                continue
+                # Check if URL is allowed by robots.txt
+                if robot_parser and not robot_parser.can_fetch("*", current_url):
+                    logger.info(f"Skipping {current_url}: blocked by robots.txt")
+                    continue
 
-            # Stay within same domain
-            if urlparse(current_url).netloc != base_domain:
-                logger.debug(f"Skipping {current_url}: outside base domain")
-                continue
+                # Stay within same domain
+                if urlparse(current_url).netloc != base_domain:
+                    logger.info(f"Skipping {current_url}: outside base domain")
+                    continue
 
-            async with semaphore:
-                logger.debug(f"Crawling {current_url} at depth {current_depth}")
-                result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
+                async with semaphore:
+                    logger.info(f"Crawling {current_url} at depth {current_depth}")
+                    result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
 
-                if result.success:
-                    logger.info(f"Successfully crawled: {current_url}")
-                    logger.debug(f"Page content: {result.html}")
-                    crawled_urls.add(current_url)
-                    with Progress() as progress:
-                        task_id = progress.add_task(f"Processing {current_url}", total=1)
+                    if result.success:
+                        logger.info(f"Successfully crawled: {current_url}")
+                        logger.debug(f"Page content: {result.html}")
+                        crawled_urls.add(current_url)
+
+                        # Process document
                         await process_and_store_document(
                             current_url, result.markdown_v2.raw_markdown, progress, task_id
                         )
 
-                    # Parse the HTML content with BeautifulSoup
-                    soup = BeautifulSoup(result.html, 'html.parser')
+                        # Process internal links
+                        if result.links and "internal" in result.links:
+                            for link in result.links["internal"]:
+                                normalized_url = urljoin(current_url, link.get("href", ""))
+                                # Only add if not already crawled and not already in to_crawl
+                                if (normalized_url not in crawled_urls and 
+                                    normalized_url not in [url for url, _ in to_crawl]):
+                                    to_crawl.append((normalized_url, current_depth + 1))
+                                    # Update progress total with new URL
+                                    progress.update(task_id, total=progress.tasks[task_id].total + 1)
 
-                    # Find all anchor tags with href attribute
-                    links = soup.find_all('a', href=True)
+                        logger.info(f"Found {len(result.links.get('internal', []))} internal links on {current_url}")
 
-                    logger.info(f"Found {len(links)} links on {current_url}")
-                    new_links = 0
-
-                    for tag in links:
-                        href = tag['href']
-                        logger.debug(f"Original href: {href}")
-
-                        # Skip empty links and fragment-only links
-                        if not href or href.startswith('#'):
-                            continue
-
-                        # Handle relative links properly
-                        normalized_url = urljoin(current_url, href.strip())
-                        # Remove URL fragments to avoid duplicates
-                        normalized_url = normalized_url.split('#')[0]
-
-                        # Verify this is a valid URL and within the same domain
-                        parsed_url = urlparse(normalized_url)
-                        if not parsed_url.scheme or not parsed_url.netloc:
-                            logger.debug(f"Skipping invalid URL: {normalized_url}")
-                            continue
-
-                        if parsed_url.netloc != base_domain:
-                            logger.debug(f"Skipping external URL: {normalized_url}")
-                            continue
-
-                        if normalized_url not in crawled_urls and normalized_url not in [url for url, _ in to_crawl]:
-                            to_crawl.append((normalized_url, current_depth + 1))
-                            new_links += 1
-                            logger.debug(f"Added to crawl queue: {normalized_url}")
-
-                    logger.info(f"Found {new_links} new links on {current_url}")
-                else:
-                    logger.error(
-                        f"Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
-                    )
+                    else:
+                        logger.error(
+                            f"Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                        )
+                    
+                    # Update progress
+                    progress.update(task_id, advance=1)
 
         logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
         return crawled_urls
-    finally:
-        await crawler.close()
-        logger.debug("Crawler closed")
 
 
 async def _get_package_documentation(
