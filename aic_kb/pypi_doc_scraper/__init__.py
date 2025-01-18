@@ -99,37 +99,40 @@ async def crawl_recursive(
         logger.info(f"Set concurrency limit to {max_concurrent}")
 
         with Progress() as progress:
-            # Initialize progress with current known URLs
-            task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
+            # Store console reference for logging
+            console = progress.console
+            
+            # Initialize progress with 1 URL (the start_url)
+            task_id = progress.add_task("[cyan]Crawling pages...", total=1)
             
             while to_crawl:
                 current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
                 if depth is not None and current_depth > depth:
-                    logger.info(f"Skipping {current_url}: max depth reached")
+                    console.print(f"[yellow]Skipping {current_url}: max depth reached")
                     continue
 
                 if current_url in crawled_urls:
-                    logger.info(f"Skipping {current_url}: already crawled")
+                    console.print(f"[yellow]Skipping {current_url}: already crawled")
                     continue
 
                 # Check if URL is allowed by robots.txt
                 if robot_parser and not robot_parser.can_fetch("*", current_url):
-                    logger.info(f"Skipping {current_url}: blocked by robots.txt")
+                    console.print(f"[yellow]Skipping {current_url}: blocked by robots.txt")
                     continue
 
                 # Stay within same domain
                 if urlparse(current_url).netloc != base_domain:
-                    logger.info(f"Skipping {current_url}: outside base domain")
+                    console.print(f"[yellow]Skipping {current_url}: outside base domain")
                     continue
 
                 async with semaphore:
-                    logger.info(f"Crawling {current_url} at depth {current_depth}")
+                    console.print(f"[blue]Crawling {current_url} at depth {current_depth}")
                     result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
 
                     if result.success:
-                        logger.info(f"Successfully crawled: {current_url}")
-                        logger.debug(f"Page content: {result.html}")
+                        console.print(f"[green]Successfully crawled: {current_url}")
+                        # console.print(f"Page content: {result.html}", style="dim")
                         crawled_urls.add(current_url)
 
                         # Process document
@@ -139,26 +142,29 @@ async def crawl_recursive(
 
                         # Process internal links
                         if result.links and "internal" in result.links:
+                            new_urls = 0  # Initialize counter
                             for link in result.links["internal"]:
                                 normalized_url = urljoin(current_url, link.get("href", ""))
                                 # Only add if not already crawled and not already in to_crawl
                                 if (normalized_url not in crawled_urls and 
                                     normalized_url not in [url for url, _ in to_crawl]):
                                     to_crawl.append((normalized_url, current_depth + 1))
-                                    # Update progress total with new URL
-                                    progress.update(task_id, total=progress.tasks[task_id].total + 1)
-
-                        logger.info(f"Found {len(result.links.get('internal', []))} internal links on {current_url}")
+                                    new_urls += 1
+                        
+                        # Update progress total with new URLs count
+                        if new_urls > 0:
+                            progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
+                            console.print(f"[blue]Found {new_urls} new internal links on {current_url}")
 
                     else:
-                        logger.error(
-                            f"Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                        console.print(
+                            f"[red]Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
                         )
                     
                     # Update progress
                     progress.update(task_id, advance=1)
 
-        logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
+        console.print(f"[green]Crawl completed. Processed {len(crawled_urls)} URLs")
         return crawled_urls
 
 
