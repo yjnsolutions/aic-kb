@@ -13,7 +13,6 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from rich.progress import Progress, TaskID
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -99,40 +98,45 @@ async def crawl_recursive(
         logger.info(f"Set concurrency limit to {max_concurrent}")
 
         with Progress() as progress:
-            # Store console reference for logging
-            console = progress.console
-            
-            # Initialize progress with 1 URL (the start_url)
+            from rich.logging import RichHandler
+
+            # Add a RichHandler to redirect logger output to the progress console
+            rich_handler = RichHandler(console=progress.console, show_time=False, show_path=False)
+
+            # Remove any existing handlers to avoid duplicate output
+            logger.handlers = []
+            logger.addHandler(rich_handler)
+            logger.propagate = False  # Prevent logs from being passed to the root logger
+
             task_id = progress.add_task("[cyan]Crawling pages...", total=1)
-            
+
             while to_crawl:
                 current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
                 if depth is not None and current_depth > depth:
-                    console.print(f"[yellow]Skipping {current_url}: max depth reached")
+                    logger.info(f"Skipping {current_url}: max depth reached")
                     continue
 
                 if current_url in crawled_urls:
-                    console.print(f"[yellow]Skipping {current_url}: already crawled")
+                    logger.info(f"Skipping {current_url}: already crawled")
                     continue
 
                 # Check if URL is allowed by robots.txt
                 if robot_parser and not robot_parser.can_fetch("*", current_url):
-                    console.print(f"[yellow]Skipping {current_url}: blocked by robots.txt")
+                    logger.info(f"Skipping {current_url}: blocked by robots.txt")
                     continue
 
                 # Stay within same domain
                 if urlparse(current_url).netloc != base_domain:
-                    console.print(f"[yellow]Skipping {current_url}: outside base domain")
+                    logger.info(f"Skipping {current_url}: outside base domain")
                     continue
 
                 async with semaphore:
-                    console.print(f"[blue]Crawling {current_url} at depth {current_depth}")
+                    logger.info(f"Crawling {current_url} at depth {current_depth}")
                     result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
 
                     if result.success:
-                        console.print(f"[green]Successfully crawled: {current_url}")
-                        # console.print(f"Page content: {result.html}", style="dim")
+                        logger.info(f"Successfully crawled: {current_url}")
                         crawled_urls.add(current_url)
 
                         # Process document
@@ -142,29 +146,31 @@ async def crawl_recursive(
 
                         # Process internal links
                         if result.links and "internal" in result.links:
-                            new_urls = 0  # Initialize counter
+                            new_urls = 0
                             for link in result.links["internal"]:
                                 normalized_url = urljoin(current_url, link.get("href", ""))
-                                # Only add if not already crawled and not already in to_crawl
-                                if (normalized_url not in crawled_urls and 
-                                    normalized_url not in [url for url, _ in to_crawl]):
+                                if (
+                                    normalized_url not in crawled_urls
+                                    and normalized_url not in [url for url, _ in to_crawl]
+                                ):
                                     to_crawl.append((normalized_url, current_depth + 1))
                                     new_urls += 1
-                        
-                        # Update progress total with new URLs count
-                        if new_urls > 0:
-                            progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
-                            console.print(f"[blue]Found {new_urls} new internal links on {current_url}")
+
+                            # Update progress total with new URLs count
+                            if new_urls > 0:
+                                progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
+                                logger.info(f"Found {new_urls} new internal links on {current_url}")
 
                     else:
-                        console.print(
-                            f"[red]Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                        logger.error(
+                            f"Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
                         )
-                    
+
                     # Update progress
                     progress.update(task_id, advance=1)
 
-        console.print(f"[green]Crawl completed. Processed {len(crawled_urls)} URLs")
+            logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
+
         return crawled_urls
 
 
