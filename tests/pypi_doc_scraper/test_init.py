@@ -30,14 +30,41 @@ async def test_process_and_store_document(tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_package_documentation():
-    # Test with invalid package
-    with pytest.raises(requests.exceptions.HTTPError):
-        await _get_package_documentation("this-package-definitely-does-not-exist")
+    # Mock the PyPI response
+    mock_pypi_data = {
+        "info": {
+            "project_urls": {
+                "Documentation": "https://docs.example.com"
+            }
+        }
+    }
 
-    # Test with valid package
-    await _get_package_documentation("requests")
-    assert Path("docs").exists()
-    assert len(list(Path("docs").glob("*.md"))) > 0
+    with patch('requests.get') as mock_get, \
+         patch('aic_kb.pypi_doc_scraper.crawl_recursive') as mock_crawl:
+        # Configure mock PyPI response
+        mock_response = Mock()
+        mock_response.json.return_value = mock_pypi_data
+        mock_get.return_value = mock_response
+        
+        # Configure mock crawl_recursive
+        mock_crawl.return_value = set(["https://docs.example.com"])
+
+        # Test with invalid package
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError
+        with pytest.raises(requests.exceptions.HTTPError):
+            await _get_package_documentation("this-package-definitely-does-not-exist")
+
+        # Reset mock for valid package test
+        mock_response.raise_for_status.side_effect = None
+        
+        # Test with valid package
+        await _get_package_documentation("requests")
+        
+        # Verify the crawl was called
+        mock_crawl.assert_called_once()
+        
+        # Verify PyPI was queried
+        mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
 
 
 @pytest.mark.asyncio
@@ -61,12 +88,15 @@ async def test_crawl_recursive():
     # Test unlimited depth
     with patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler:
         mock_instance = Mock()
+        # Add async context manager methods
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=None)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
-        mock_instance.arun.return_value.links = []
+        mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
@@ -75,18 +105,16 @@ async def test_crawl_recursive():
 
     # Test BFS strategy
     with patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler:
-        # Create mock instance
         mock_instance = Mock()
-        # Make start() return a coroutine
-        mock_instance.start.return_value = None
+        # Add async context manager methods
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=None)
         mock_instance.start = AsyncMock()
-        # Make arun() return a coroutine
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
-        mock_instance.arun.return_value.links = []
-        # Make close() return a coroutine
+        mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
@@ -95,14 +123,16 @@ async def test_crawl_recursive():
 
     # Test DFS strategy
     with patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler:
-        # Create mock instance
         mock_instance = Mock()
+        # Add async context manager methods
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=None)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
-        mock_instance.arun.return_value.links = []
+        mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
@@ -121,6 +151,9 @@ async def test_robots_txt_handling():
     with patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler:
         # Create mock instance with async methods
         mock_instance = Mock()
+        # Add async context manager methods
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=None)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.close = AsyncMock()
