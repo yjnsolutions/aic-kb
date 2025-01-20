@@ -135,6 +135,7 @@ async def crawl_recursive(
     strategy: CrawlStrategy,
     robot_parser: Optional[RobotFileParser] = None,
     max_concurrent: int = 5,
+    limit: Optional[int] = None,
 ) -> Set[str]:
     """
     Recursively crawl a website starting from a URL.
@@ -145,12 +146,16 @@ async def crawl_recursive(
         strategy: BFS or DFS crawling strategy
         robot_parser: RobotFileParser instance for robots.txt rules
         max_concurrent: Maximum number of concurrent requests
+        limit: Maximum number of pages to crawl (None for unlimited)
 
     Returns:
         Set of successfully crawled URLs
     """
     logger.info(
-        f"Starting recursive crawl of {start_url} with depth={'unlimited' if depth is None else depth}, strategy={strategy.value}"
+        f"Starting recursive crawl of {start_url} with "
+        f"depth={'unlimited' if depth is None else depth}, "
+        f"strategy={strategy.value}, "
+        f"limit={'unlimited' if limit is None else limit}"
     )
 
     browser_config = BrowserConfig(
@@ -196,6 +201,11 @@ async def crawl_recursive(
             signal.signal(signal.SIGTERM, signal_handler)
 
             while to_crawl and not shutdown_event.is_set():
+                # Add limit check
+                if limit is not None and len(crawled_urls) >= limit:
+                    logger.info(f"Reached crawl limit of {limit} pages")
+                    break
+
                 current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
                 if depth is not None and current_depth > depth:
@@ -286,13 +296,12 @@ async def crawl_recursive(
 
             if shutdown_event.is_set():
                 logger.info("Shutdown requested, cleaning up...")
-                await crawler.close()
                 progress.stop()
                 logger.info("Cleanup complete")
             else:
                 logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
-
-        return crawled_urls
+            
+            return crawled_urls
 
 
 async def _get_package_documentation(
@@ -301,6 +310,7 @@ async def _get_package_documentation(
     depth: Optional[int] = None,
     strategy: str = "bfs",
     ignore_robots: bool = False,
+    limit: Optional[int] = None,
 ) -> None:
     """
     setup_rich_logging()
@@ -356,7 +366,7 @@ async def _get_package_documentation(
     crawl_strat = CrawlStrategy.BFS if strategy.lower() == "bfs" else CrawlStrategy.DFS
     logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
     try:
-        await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser)
+        await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser, limit=limit)
     except Exception as e:
         logger.error(f"Error during documentation crawl: {str(e)}")
         if not shutdown_event.is_set():
