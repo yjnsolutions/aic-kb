@@ -17,6 +17,7 @@ from rich.progress import Progress, TaskID
 # Setup logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+logger.handlers = []  # Clear existing handlers
 
 # Global shutdown event
 shutdown_event = asyncio.Event()
@@ -106,16 +107,7 @@ async def crawl_recursive(
 
     logger.debug("Initializing web crawler")
     async with AsyncWebCrawler(config=browser_config) as crawler:
-        # Initialize URL tracker for handling redirects
         url_tracker = URLTracker()
-
-        async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
-            final_url = await page.evaluate("window.location.href")
-            url_tracker.set_final_url(page.url, final_url)
-            return page
-
-        # Set up the hook to capture final URLs
-        crawler.crawler_strategy.set_hook("before_return_html", capture_final_url)
 
         crawled_urls = set()
         to_crawl = [(start_url, 0)]  # (url, depth)
@@ -164,6 +156,12 @@ async def crawl_recursive(
 
                     logger.info(f"Crawling {current_url} at depth {current_depth}")
                     try:
+                        async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
+                            url_tracker.set_final_url(current_url, page.url)
+                            return page
+
+                        crawler.crawler_strategy.set_hook("before_return_html", capture_final_url)
+
                         result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
 
                         # Check for successful status code (2xx range)
@@ -175,39 +173,45 @@ async def crawl_recursive(
                             continue
 
                         # Get the actual final URL from our tracker
-                        actual_final_url = url_tracker.final_urls.get(current_url)
-                        if actual_final_url:
+                        actual_final_url = url_tracker.final_urls.get(current_url, current_url)
+
+                        if actual_final_url != current_url:
                             logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
-                            base_url = actual_final_url
-                        else:
-                            base_url = current_url
+                        base_url = actual_final_url
+
+                        # Skip if final URL is outside base domain
+                        if urlparse(base_url).netloc != base_domain:
+                            logger.info(f"Skipping {base_url}: outside base domain after redirect")
+                            continue
 
                         # Only process and store successful responses
                         if result.markdown_v2 and result.markdown_v2.raw_markdown:
                             await process_and_store_document(
-                                current_url, result.markdown_v2.raw_markdown, progress, task_id
+                                base_url, result.markdown_v2.raw_markdown, progress, task_id
                             )
                             progress.update(task_id, advance=1)
-                            logger.info(f"Successfully crawled and stored: {current_url}")
-                            crawled_urls.add(current_url)
+                            logger.info(f"Successfully crawled and stored: {base_url} (redirect from {current_url})")
+                            crawled_urls.add(base_url)
 
                             # Process internal links only for successfully stored pages
                             if result.links and "internal" in result.links:
                                 new_urls = 0
                                 for link in result.links["internal"]:
-                                    normalized_url = urljoin(base_url, link.get("href", ""))
-                                    if normalized_url not in crawled_urls and normalized_url not in [
-                                        url for url, _ in to_crawl
-                                    ]:
+                                    href = link.get("href", "")
+                                    if not href:
+                                        continue
+
+                                    normalized_url = href.replace(current_url, actual_final_url)
+                                    if (normalized_url not in crawled_urls and
+                                        normalized_url not in [url for url, _ in to_crawl]):
                                         to_crawl.append((normalized_url, current_depth + 1))
                                         new_urls += 1
 
                                 if new_urls > 0:
                                     progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
-                                    logger.info(f"Found {new_urls} new internal links on {current_url}")
-
+                                    logger.info(f"Found {new_urls} new internal links on {base_url}")
                         else:
-                            logger.warning(f"No markdown content for {current_url}")
+                            logger.warning(f"No markdown content for {base_url}")
                             continue
                     except Exception as e:
                         logger.error(f"Error crawling {current_url}: {str(e)}")
@@ -287,7 +291,7 @@ async def _get_package_documentation(
         await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser)
     except Exception as e:
         logger.error(f"Error during documentation crawl: {str(e)}")
-        if not shutdown_event.is_set():  # Only re-raise if not shutting down
+        if not shutdown_event.is_set():
             raise
     finally:
         if shutdown_event.is_set():
