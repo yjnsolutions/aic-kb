@@ -5,7 +5,7 @@ import signal
 import urllib.parse
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -13,6 +13,8 @@ import requests
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
 from rich.progress import Progress, TaskID
+
+from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -22,14 +24,18 @@ logger.handlers = []  # Clear existing handlers
 # Global shutdown event
 shutdown_event = asyncio.Event()
 
+
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
     logger.info(f"Received signal {signum}, initiating graceful shutdown...")
     shutdown_event.set()
 
-async def process_and_store_document(url: str, content: str, progress: Progress, task_id: TaskID) -> None:
+
+async def process_and_store_document(
+    url: str, content: str, progress: Progress, task_id: TaskID
+) -> List[ProcessedChunk]:
     """
-    Store the scraped content in a markdown file.
+    Store the scraped content in markdown files and process chunks for embeddings.
 
     Args:
         url: The URL of the scraped page
@@ -37,6 +43,8 @@ async def process_and_store_document(url: str, content: str, progress: Progress,
         progress: Rich progress bar instance
         task_id: Task ID for updating progress
     """
+    from .extract import chunk_text, process_chunk
+
     # Create docs directory if it doesn't exist
     output_dir = Path("docs")
     output_dir.mkdir(exist_ok=True)
@@ -50,13 +58,27 @@ async def process_and_store_document(url: str, content: str, progress: Progress,
 
     # Remove leading and trailing underscores
     filename = filename.strip("_")
-
     if not filename:
         filename = "index"
 
-    # Save content to file
+    # Save original content to file
     output_path = output_dir / f"{filename}.md"
     output_path.write_text(content)
+
+    # Process chunks
+    chunks = chunk_text(content)
+    processed_chunks = []
+
+    for i, chunk in enumerate(chunks):
+        try:
+            processed_chunk = await process_chunk(chunk, i, url)
+            processed_chunks.append(processed_chunk)
+        except Exception as e:
+            logger.error(f"Error processing chunk {i} from {url}: {e}")
+            continue
+
+    # TODO: Store processed chunks in your vector database or other storage
+    return processed_chunks
 
 
 class CrawlStrategy(Enum):
@@ -117,7 +139,13 @@ async def crawl_recursive(
         semaphore = asyncio.Semaphore(max_concurrent)
         logger.info(f"Set concurrency limit to {max_concurrent}")
 
-        from rich.progress import TextColumn, BarColumn, TaskProgressColumn, MofNCompleteColumn
+        from rich.progress import (
+            BarColumn,
+            MofNCompleteColumn,
+            TaskProgressColumn,
+            TextColumn,
+        )
+
         with Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -162,6 +190,7 @@ async def crawl_recursive(
 
                     logger.info(f"Crawling {current_url} at depth {current_depth}")
                     try:
+
                         async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
                             url_tracker.set_final_url(current_url, page.url)
                             return page
@@ -192,11 +221,15 @@ async def crawl_recursive(
 
                         # Only process and store successful responses
                         if result.markdown_v2 and result.markdown_v2.raw_markdown:
-                            await process_and_store_document(
+                            processed_chunks = await process_and_store_document(
                                 base_url, result.markdown_v2.raw_markdown, progress, task_id
                             )
                             progress.update(task_id, advance=1)
                             logger.info(f"Successfully crawled and stored: {base_url} (redirect from {current_url})")
+                            logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
+                            print(processed_chunks[0].title)
+                            print(processed_chunks[0].summary)
+                            print(processed_chunks[0].embedding)
                             crawled_urls.add(base_url)
 
                             # Process internal links only for successfully stored pages
@@ -208,8 +241,9 @@ async def crawl_recursive(
                                         continue
 
                                     normalized_url = href.replace(current_url, actual_final_url)
-                                    if (normalized_url not in crawled_urls and
-                                        normalized_url not in [url for url, _ in to_crawl]):
+                                    if normalized_url not in crawled_urls and normalized_url not in [
+                                        url for url, _ in to_crawl
+                                    ]:
                                         to_crawl.append((normalized_url, current_depth + 1))
                                         new_urls += 1
 

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Optional
 
 import typer
@@ -18,15 +19,19 @@ def get_package_documentation(
     depth: Optional[int] = typer.Option(None, help="Maximum recursion depth for crawling (None for unlimited)"),
     strategy: str = typer.Option("bfs", help="Crawling strategy: 'bfs' or 'dfs'"),
     ignore_robots: bool = typer.Option(False, help="Ignore robots.txt rules"),
+    embedding_model: str = typer.Option("text-embedding-3-small", help="Model to use for embeddings"),
 ):
     """
     Scrape documentation for a Python package and save as markdown files.
 
     Usage:
         uv run aic-kb get-package-documentation requests
-        uv run aic-kb get-package-documentation requests --version 2.31.0 --depth 2 --strategy dfs
+        uv run aic-kb get-package-documentation requests --version 2.31.0 --depth 2 --strategy dfs --embedding-model text-embedding-3-small
     """
     from aic_kb.pypi_doc_scraper import _get_package_documentation
+
+    # Set embedding model in environment
+    os.environ["EMBEDDING_MODEL"] = embedding_model
 
     asyncio.run(_get_package_documentation(package_name, version, depth, strategy, ignore_robots))
 
