@@ -5,7 +5,7 @@ import signal
 import urllib.parse
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -129,6 +129,24 @@ class URLTracker:
         self.final_urls[original_url] = final_url
 
 
+async def crawl_url(crawler: AsyncWebCrawler, crawl_config: CrawlerRunConfig, url: str) -> Tuple[Any, str]:
+    final_url = None
+
+    async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
+        nonlocal final_url
+        final_url = page.url
+        return page
+
+    crawler.crawler_strategy.set_hook("before_return_html", capture_final_url)
+
+    result = await crawler.arun(url=url, config=crawl_config, session_id="session1")
+
+    if final_url is None:
+        final_url = url
+
+    return result, final_url
+
+
 async def crawl_recursive(
     start_url: str,
     depth: Optional[int],
@@ -169,8 +187,6 @@ async def crawl_recursive(
 
     logger.debug("Initializing web crawler")
     async with AsyncWebCrawler(config=browser_config) as crawler:
-        url_tracker = URLTracker()
-
         crawled_urls: Set[str] = set()
         to_crawl = [(start_url, 0)]  # (url, depth)
         base_domain = urlparse(start_url).netloc
@@ -230,14 +246,10 @@ async def crawl_recursive(
 
                     logger.info(f"Crawling {current_url} at depth {current_depth}")
                     try:
-
-                        async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
-                            url_tracker.set_final_url(current_url, page.url)
-                            return page
-
-                        crawler.crawler_strategy.set_hook("before_return_html", capture_final_url)
-
-                        result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
+                        result, actual_final_url = await crawl_url(crawler, crawl_config, current_url)
+                        if actual_final_url != current_url:
+                            logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
+                        base_url = actual_final_url
 
                         # Check for successful status code (2xx range)
                         if not result.success or (result.status_code and not 200 <= result.status_code < 300):
@@ -246,13 +258,6 @@ async def crawl_recursive(
                                 f"{result.error_message or 'Unknown error'}"
                             )
                             continue
-
-                        # Get the actual final URL from our tracker
-                        actual_final_url = url_tracker.final_urls.get(current_url, current_url)
-
-                        if actual_final_url != current_url:
-                            logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
-                        base_url = actual_final_url
 
                         # Skip if final URL is outside base domain
                         if urlparse(base_url).netloc != base_domain:
