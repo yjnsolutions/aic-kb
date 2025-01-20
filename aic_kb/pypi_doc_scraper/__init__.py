@@ -1,21 +1,30 @@
 import asyncio
 import logging
 import re
+import signal
 import urllib.parse
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Set
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
+from playwright.async_api import BrowserContext, Page
 from rich.progress import Progress, TaskID
 
 # Setup logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Global shutdown event
+shutdown_event = asyncio.Event()
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    shutdown_event.set()
 
 async def process_and_store_document(url: str, content: str, progress: Progress, task_id: TaskID) -> None:
     """
@@ -54,13 +63,21 @@ class CrawlStrategy(Enum):
     DFS = "dfs"
 
 
+class URLTracker:
+    def __init__(self):
+        self.final_urls: Dict[str, str] = {}
+
+    def set_final_url(self, original_url: str, final_url: str):
+        self.final_urls[original_url] = final_url
+
+
 async def crawl_recursive(
     start_url: str,
     depth: Optional[int],
     strategy: CrawlStrategy,
     robot_parser: Optional[RobotFileParser] = None,
     max_concurrent: int = 5,
-) -> set[str]:
+) -> Set[str]:
     """
     Recursively crawl a website starting from a URL.
 
@@ -89,6 +106,17 @@ async def crawl_recursive(
 
     logger.debug("Initializing web crawler")
     async with AsyncWebCrawler(config=browser_config) as crawler:
+        # Initialize URL tracker for handling redirects
+        url_tracker = URLTracker()
+
+        async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
+            final_url = await page.evaluate("window.location.href")
+            url_tracker.set_final_url(page.url, final_url)
+            return page
+
+        # Set up the hook to capture final URLs
+        crawler.crawler_strategy.set_hook("before_return_html", capture_final_url)
+
         crawled_urls = set()
         to_crawl = [(start_url, 0)]  # (url, depth)
         base_domain = urlparse(start_url).netloc
@@ -100,17 +128,18 @@ async def crawl_recursive(
         with Progress() as progress:
             from rich.logging import RichHandler
 
-            # Add a RichHandler to redirect logger output to the progress console
             rich_handler = RichHandler(console=progress.console, show_time=False, show_path=False)
-
-            # Remove any existing handlers to avoid duplicate output
             logger.handlers = []
             logger.addHandler(rich_handler)
-            logger.propagate = False  # Prevent logs from being passed to the root logger
+            logger.propagate = False
 
             task_id = progress.add_task("[cyan]Crawling pages...", total=1)
 
-            while to_crawl:
+            # Setup signal handlers
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+            while to_crawl and not shutdown_event.is_set():
                 current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
                 if depth is not None and current_depth > depth:
@@ -121,55 +150,76 @@ async def crawl_recursive(
                     logger.info(f"Skipping {current_url}: already crawled")
                     continue
 
-                # Check if URL is allowed by robots.txt
                 if robot_parser and not robot_parser.can_fetch("*", current_url):
                     logger.info(f"Skipping {current_url}: blocked by robots.txt")
                     continue
 
-                # Stay within same domain
                 if urlparse(current_url).netloc != base_domain:
                     logger.info(f"Skipping {current_url}: outside base domain")
                     continue
 
                 async with semaphore:
+                    if shutdown_event.is_set():
+                        break
+
                     logger.info(f"Crawling {current_url} at depth {current_depth}")
-                    result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
+                    try:
+                        result = await crawler.arun(url=current_url, config=crawl_config, session_id="session1")
 
-                    if result.success:
-                        logger.info(f"Successfully crawled: {current_url}")
-                        crawled_urls.add(current_url)
+                        # Check for successful status code (2xx range)
+                        if not result.success or (result.status_code and not 200 <= result.status_code < 300):
+                            logger.warning(
+                                f"Skipping {current_url}: HTTP {result.status_code or 'unknown'} - "
+                                f"{result.error_message or 'Unknown error'}"
+                            )
+                            continue
 
-                        # Process document
-                        await process_and_store_document(
-                            current_url, result.markdown_v2.raw_markdown, progress, task_id
-                        )
+                        # Get the actual final URL from our tracker
+                        actual_final_url = url_tracker.final_urls.get(current_url)
+                        if actual_final_url:
+                            logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
+                            base_url = actual_final_url
+                        else:
+                            base_url = current_url
 
-                        # Process internal links
-                        if result.links and "internal" in result.links:
-                            new_urls = 0
-                            for link in result.links["internal"]:
-                                normalized_url = urljoin(current_url, link.get("href", ""))
-                                if (
-                                    normalized_url not in crawled_urls
-                                    and normalized_url not in [url for url, _ in to_crawl]
-                                ):
-                                    to_crawl.append((normalized_url, current_depth + 1))
-                                    new_urls += 1
+                        # Only process and store successful responses
+                        if result.markdown_v2 and result.markdown_v2.raw_markdown:
+                            await process_and_store_document(
+                                current_url, result.markdown_v2.raw_markdown, progress, task_id
+                            )
+                            progress.update(task_id, advance=1)
+                            logger.info(f"Successfully crawled and stored: {current_url}")
+                            crawled_urls.add(current_url)
 
-                            # Update progress total with new URLs count
-                            if new_urls > 0:
-                                progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
-                                logger.info(f"Found {new_urls} new internal links on {current_url}")
+                            # Process internal links only for successfully stored pages
+                            if result.links and "internal" in result.links:
+                                new_urls = 0
+                                for link in result.links["internal"]:
+                                    normalized_url = urljoin(base_url, link.get("href", ""))
+                                    if normalized_url not in crawled_urls and normalized_url not in [
+                                        url for url, _ in to_crawl
+                                    ]:
+                                        to_crawl.append((normalized_url, current_depth + 1))
+                                        new_urls += 1
 
-                    else:
-                        logger.error(
-                            f"Failed to crawl {current_url}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
-                        )
+                                if new_urls > 0:
+                                    progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
+                                    logger.info(f"Found {new_urls} new internal links on {current_url}")
 
-                    # Update progress
-                    progress.update(task_id, advance=1)
+                        else:
+                            logger.warning(f"No markdown content for {current_url}")
+                            continue
+                    except Exception as e:
+                        logger.error(f"Error crawling {current_url}: {str(e)}")
+                        continue
 
-            logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
+            if shutdown_event.is_set():
+                logger.info("Shutdown requested, cleaning up...")
+                await crawler.close()
+                progress.stop()
+                logger.info("Cleanup complete")
+            else:
+                logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
 
         return crawled_urls
 
@@ -233,4 +283,12 @@ async def _get_package_documentation(
     # Run recursive crawler
     crawl_strat = CrawlStrategy.BFS if strategy.lower() == "bfs" else CrawlStrategy.DFS
     logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
-    await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser)
+    try:
+        await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser)
+    except Exception as e:
+        logger.error(f"Error during documentation crawl: {str(e)}")
+        if not shutdown_event.is_set():  # Only re-raise if not shutting down
+            raise
+    finally:
+        if shutdown_event.is_set():
+            logger.info("Package documentation crawl interrupted by user")

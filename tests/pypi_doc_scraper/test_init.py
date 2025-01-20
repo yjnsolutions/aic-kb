@@ -31,23 +31,16 @@ async def test_process_and_store_document(tmp_path):
 @pytest.mark.asyncio
 async def test_get_package_documentation():
     # Mock the PyPI response
-    mock_pypi_data = {
-        "info": {
-            "project_urls": {
-                "Documentation": "https://docs.example.com"
-            }
-        }
-    }
+    mock_pypi_data = {"info": {"project_urls": {"Documentation": "https://docs.example.com"}}}
 
-    with patch('requests.get') as mock_get, \
-         patch('aic_kb.pypi_doc_scraper.crawl_recursive') as mock_crawl:
+    with patch("requests.get") as mock_get, patch("aic_kb.pypi_doc_scraper.crawl_recursive") as mock_crawl:
         # Configure mock PyPI response
         mock_response = Mock()
         mock_response.json.return_value = mock_pypi_data
         mock_get.return_value = mock_response
-        
+
         # Configure mock crawl_recursive
-        mock_crawl.return_value = set(["https://docs.example.com"])
+        mock_crawl.return_value = {"https://docs.example.com"}
 
         # Test with invalid package
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError
@@ -56,13 +49,13 @@ async def test_get_package_documentation():
 
         # Reset mock for valid package test
         mock_response.raise_for_status.side_effect = None
-        
+
         # Test with valid package
         await _get_package_documentation("requests")
-        
+
         # Verify the crawl was called
         mock_crawl.assert_called_once()
-        
+
         # Verify PyPI was queried
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
 
@@ -94,6 +87,7 @@ async def test_crawl_recursive():
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
+        mock_instance.arun.return_value.status_code = 200
         mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
@@ -112,6 +106,7 @@ async def test_crawl_recursive():
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
+        mock_instance.arun.return_value.status_code = 200
         mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
@@ -130,6 +125,7 @@ async def test_crawl_recursive():
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
+        mock_instance.arun.return_value.status_code = 200
         mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
