@@ -12,9 +12,44 @@ from urllib.robotparser import RobotFileParser
 import requests
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
+from rich.console import Console
+from rich.logging import RichHandler
 from rich.progress import Progress, TaskID
 
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
+
+
+def setup_rich_logging(progress=None):
+    """Configure all relevant loggers to use RichHandler"""
+    # Get console from progress if provided, otherwise create new one
+    if progress:
+        console = progress.console
+    else:
+        console = Console()
+
+    # Create handler
+    rich_handler = RichHandler(console=console, show_time=False, show_path=False, markup=True)
+
+    # Configure format
+    rich_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.handlers = [rich_handler]
+    root_logger.setLevel(logging.INFO)
+
+    # Configure specific loggers
+    loggers_to_configure = ["aic_kb.pypi_doc_scraper", "httpx", "LiteLLM"]
+
+    # Set litellm logger to WARNING level
+    logging.getLogger("litellm").setLevel(logging.WARNING)
+
+    for logger_name in loggers_to_configure:
+        logger = logging.getLogger(logger_name)
+        logger.handlers = []  # Remove existing handlers
+        logger.addHandler(rich_handler)
+        logger.propagate = False
+
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -43,7 +78,7 @@ async def process_and_store_document(
         progress: Rich progress bar instance
         task_id: Task ID for updating progress
     """
-    from .extract import chunk_text, process_chunk
+    from .extract import chunk_text
 
     # Create docs directory if it doesn't exist
     output_dir = Path("docs")
@@ -152,12 +187,7 @@ async def crawl_recursive(
             MofNCompleteColumn(),
             TaskProgressColumn(),
         ) as progress:
-            from rich.logging import RichHandler
-
-            rich_handler = RichHandler(console=progress.console, show_time=False, show_path=False)
-            logger.handlers = []
-            logger.addHandler(rich_handler)
-            logger.propagate = False
+            setup_rich_logging(progress)
 
             task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
 
@@ -227,9 +257,6 @@ async def crawl_recursive(
                             progress.update(task_id, advance=1)
                             logger.info(f"Successfully crawled and stored: {base_url} (redirect from {current_url})")
                             logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
-                            print(processed_chunks[0].title)
-                            print(processed_chunks[0].summary)
-                            print(processed_chunks[0].embedding)
                             crawled_urls.add(base_url)
 
                             # Process internal links only for successfully stored pages
@@ -276,6 +303,7 @@ async def _get_package_documentation(
     ignore_robots: bool = False,
 ) -> None:
     """
+    setup_rich_logging()
     Get documentation for a Python package.
 
     Args:
