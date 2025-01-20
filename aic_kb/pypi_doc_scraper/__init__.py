@@ -117,7 +117,13 @@ async def crawl_recursive(
         semaphore = asyncio.Semaphore(max_concurrent)
         logger.info(f"Set concurrency limit to {max_concurrent}")
 
-        with Progress() as progress:
+        from rich.progress import TextColumn, BarColumn, TaskProgressColumn, MofNCompleteColumn
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TaskProgressColumn(),
+        ) as progress:
             from rich.logging import RichHandler
 
             rich_handler = RichHandler(console=progress.console, show_time=False, show_path=False)
@@ -125,7 +131,7 @@ async def crawl_recursive(
             logger.addHandler(rich_handler)
             logger.propagate = False
 
-            task_id = progress.add_task("[cyan]Crawling pages...", total=1)
+            task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
 
             # Setup signal handlers
             signal.signal(signal.SIGINT, signal_handler)
@@ -208,7 +214,7 @@ async def crawl_recursive(
                                         new_urls += 1
 
                                 if new_urls > 0:
-                                    progress.update(task_id, total=progress.tasks[task_id].total + new_urls)
+                                    progress.update(task_id, total=len(to_crawl))
                                     logger.info(f"Found {new_urls} new internal links on {base_url}")
                         else:
                             logger.warning(f"No markdown content for {base_url}")
