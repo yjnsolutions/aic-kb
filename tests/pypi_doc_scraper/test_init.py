@@ -130,7 +130,10 @@ async def test_crawl_recursive():
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
-        mock_instance.__aexit__ = AsyncMock(return_value=None)
+        async def mock_aexit(*args):
+            await mock_instance.close()
+            return None
+        mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
@@ -155,7 +158,10 @@ async def test_crawl_recursive():
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
-        mock_instance.__aexit__ = AsyncMock(return_value=None)
+        async def mock_aexit(*args):
+            await mock_instance.close()
+            return None
+        mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
@@ -174,7 +180,10 @@ async def test_crawl_recursive():
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
-        mock_instance.__aexit__ = AsyncMock(return_value=None)
+        async def mock_aexit(*args):
+            await mock_instance.close()
+            return None
+        mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
@@ -211,7 +220,10 @@ async def test_robots_txt_handling():
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
-        mock_instance.__aexit__ = AsyncMock(return_value=None)
+        async def mock_aexit(*args):
+            await mock_instance.close()
+            return None
+        mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
         mock_instance.close = AsyncMock()
