@@ -1,5 +1,7 @@
+from unittest.mock import AsyncMock, patch
+
 from typer.testing import CliRunner
-from unittest.mock import patch, AsyncMock
+
 from aic_kb.cli import app, build_string
 
 runner = CliRunner()
@@ -11,7 +13,7 @@ def test_build_string():
 
 def test_get_package_documentation():
     # Mock the async function
-    with patch('aic_kb.pypi_doc_scraper._get_package_documentation', new_callable=AsyncMock) as mock_get_docs:
+    with patch("aic_kb.pypi_doc_scraper._get_package_documentation", new_callable=AsyncMock) as mock_get_docs:
         result = runner.invoke(app, ["get-package-documentation", "requests"])
         assert result.exit_code == 0
         # Verify the mock was called with correct arguments
