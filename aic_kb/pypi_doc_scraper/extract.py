@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -6,6 +7,45 @@ from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from litellm import acompletion, aembedding
+
+logger = logging.getLogger(__name__)
+
+
+# Add global cost tracking
+class CostTracker:
+    def __init__(self):
+        self.completion_cost = 0.0
+        self.embedding_cost = 0.0
+        self.completion_tokens = 0
+        self.embedding_tokens = 0
+
+    def add_completion_cost(self, cost: float, tokens: int):
+        self.completion_cost += cost
+        self.completion_tokens += tokens
+
+    def add_embedding_cost(self, cost: float, tokens: int):
+        self.embedding_cost += cost
+        self.embedding_tokens += tokens
+
+    @property
+    def total_cost(self) -> float:
+        return self.completion_cost + self.embedding_cost
+
+    def get_summary(self) -> str:
+        return (
+            f"=== Cost and Token Usage Summary ===\n"
+            f"Completion Cost: ${self.completion_cost:.6f}\n"
+            f"Embedding Cost: ${self.embedding_cost:.6f}\n"
+            f"Total Cost: ${self.total_cost:.6f}\n"
+            f"\n"
+            f"Completion Tokens: {self.completion_tokens}\n"
+            f"Embedding Tokens: {self.embedding_tokens}\n"
+            f"Total Tokens: {self.completion_tokens + self.embedding_tokens}"
+        )
+
+
+# Create global cost tracker instance
+cost_tracker = CostTracker()
 
 
 @dataclass
@@ -36,6 +76,18 @@ async def get_title_and_summary(chunk: str, url: str) -> Dict[str, str]:
             ],
             response_format={"type": "json_object"},
         )
+        # Track cost and tokens
+        cost = response._hidden_params.get("response_cost", 0)
+        total_tokens = response.usage.total_tokens
+        cost_tracker.add_completion_cost(cost, total_tokens)
+
+        # Log individual call stats
+        logger.info(
+            f"Title/Summary Generation - Tokens: {total_tokens} "
+            f"(Prompt: {response.usage.prompt_tokens}, "
+            f"Completion: {response.usage.completion_tokens}), "
+            f"Cost: ${cost:.6f}"
+        )
         return json.loads(response.choices[0].message.content)
     except Exception as e:
         print(f"Error getting title and summary: {e}")
@@ -46,6 +98,13 @@ async def get_embedding(text: str) -> List[float]:
     """Get embedding vector using litellm."""
     try:
         response = await aembedding(model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"), input=text)
+        # Track cost and tokens
+        cost = response._hidden_params.get("response_cost", 0)
+        total_tokens = response.usage.total_tokens
+        cost_tracker.add_embedding_cost(cost, total_tokens)
+
+        # Log individual call stats
+        logger.info(f"Embedding Generation - Tokens: {total_tokens}, " f"Cost: ${cost:.6f}")
         # The embedding is directly in response.data[0], no need for .embedding
         return response.data[0]
     except Exception as e:
@@ -78,6 +137,12 @@ async def process_chunk(chunk: str, chunk_number: int, url: str) -> ProcessedChu
         metadata=metadata,
         embedding=embedding,
     )
+
+
+# Add function to log final cost summary
+def log_cost_summary():
+    """Log the final cost and token usage summary."""
+    logger.info(cost_tracker.get_summary())
 
 
 def chunk_text(text: str, chunk_size: int = 5000) -> List[str]:

@@ -171,7 +171,7 @@ async def crawl_recursive(
     async with AsyncWebCrawler(config=browser_config) as crawler:
         url_tracker = URLTracker()
 
-        crawled_urls = set()
+        crawled_urls: Set[str] = set()
         to_crawl = [(start_url, 0)]  # (url, depth)
         base_domain = urlparse(start_url).netloc
         logger.info(f"Base domain: {base_domain}")
@@ -300,7 +300,12 @@ async def crawl_recursive(
                 logger.info("Cleanup complete")
             else:
                 logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
-            
+
+            # Log final cost summary
+            from .extract import log_cost_summary
+
+            log_cost_summary()
+
             return crawled_urls
 
 
