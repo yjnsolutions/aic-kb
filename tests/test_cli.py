@@ -25,7 +25,7 @@ def test_get_package_documentation():
     with (
         patch("litellm.acompletion", return_value=mock_completion_response),
         patch("litellm.aembedding", return_value=mock_embedding_response),
-        patch("aic_kb.pypi_doc_scraper._get_package_documentation", new_callable=AsyncMock) as mock_get_docs,
+        patch("aic_kb.pypi_doc_scraper.crawl._get_package_documentation", new_callable=AsyncMock) as mock_get_docs,
     ):
 
         result = runner.invoke(app, ["get-package-documentation", "requests"])
