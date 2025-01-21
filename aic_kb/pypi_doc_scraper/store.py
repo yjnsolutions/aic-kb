@@ -11,6 +11,15 @@ from rich.progress import Progress, TaskID
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
 
+async def create_connection():
+    return await asyncpg.connect(
+        user="postgres",  # Replace with actual credentials
+        password="mysecretpassword",  # Replace with actual credentials
+        database="postgres",  # Replace with actual database name
+        host="localhost",  # Replace with actual host
+    )
+
+
 async def process_and_store_document(
     url: str, content: str, progress: Progress, task_id: TaskID, connection: asyncpg.Connection, logger: logging.Logger
 ) -> List[ProcessedChunk]:
