@@ -1,22 +1,20 @@
 import asyncio
 import logging
-import re
 import signal
-import urllib.parse
 from enum import Enum
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
+import asyncpg
 import requests
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, TaskID
+from rich.progress import Progress
 
-from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
+from aic_kb.pypi_doc_scraper.store import process_and_store_document
 
 
 def setup_rich_logging(progress=None):
@@ -64,56 +62,6 @@ def signal_handler(signum, frame):
     """Handle shutdown signals"""
     logger.info(f"Received signal {signum}, initiating graceful shutdown...")
     shutdown_event.set()
-
-
-async def process_and_store_document(
-    url: str, content: str, progress: Progress, task_id: TaskID
-) -> List[ProcessedChunk]:
-    """
-    Store the scraped content in markdown files and process chunks for embeddings.
-
-    Args:
-        url: The URL of the scraped page
-        content: The markdown content to store
-        progress: Rich progress bar instance
-        task_id: Task ID for updating progress
-    """
-    from .extract import chunk_text
-
-    # Create docs directory if it doesn't exist
-    output_dir = Path("docs")
-    output_dir.mkdir(exist_ok=True)
-
-    # Update description while processing
-    progress.update(task_id, description=f"[cyan]Processing: {url}")
-
-    # Convert URL to filename
-    parsed = urllib.parse.urlparse(url)
-    filename = re.sub(r"[^\w\-_]", "_", parsed.path + "_" + parsed.query + "_" + parsed.fragment).strip("_")
-
-    # Remove leading and trailing underscores
-    filename = filename.strip("_")
-    if not filename:
-        filename = "index"
-
-    # Save original content to file
-    output_path = output_dir / f"{filename}.md"
-    output_path.write_text(content)
-
-    # Process chunks
-    chunks = chunk_text(content)
-    processed_chunks = []
-
-    for i, chunk in enumerate(chunks):
-        try:
-            processed_chunk = await process_chunk(chunk, i, url)
-            processed_chunks.append(processed_chunk)
-        except Exception as e:
-            logger.error(f"Error processing chunk {i} from {url}: {e}")
-            continue
-
-    # TODO: Store processed chunks in your vector database or other storage
-    return processed_chunks
 
 
 class CrawlStrategy(Enum):
@@ -169,149 +117,164 @@ async def crawl_recursive(
     Returns:
         Set of successfully crawled URLs
     """
-    logger.info(
-        f"Starting recursive crawl of {start_url} with "
-        f"depth={'unlimited' if depth is None else depth}, "
-        f"strategy={strategy.value}, "
-        f"limit={'unlimited' if limit is None else limit}"
+    # Create database connection
+    connection = await asyncpg.connect(
+        user="postgres",  # Replace with actual credentials
+        password="mysecretpassword",  # Replace with actual credentials
+        database="postgres",  # Replace with actual database name
+        host="localhost",  # Replace with actual host
     )
 
-    browser_config = BrowserConfig(
-        headless=True,
-        verbose=False,
-        extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
-    )
-    crawl_config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-    )
-
-    logger.debug("Initializing web crawler")
-    async with AsyncWebCrawler(config=browser_config) as crawler:
-        crawled_urls: Set[str] = set()
-        to_crawl = [(start_url, 0)]  # (url, depth)
-        base_domain = urlparse(start_url).netloc
-        logger.info(f"Base domain: {base_domain}")
-
-        semaphore = asyncio.Semaphore(max_concurrent)
-        logger.info(f"Set concurrency limit to {max_concurrent}")
-
-        from rich.progress import (
-            BarColumn,
-            MofNCompleteColumn,
-            TaskProgressColumn,
-            TextColumn,
+    try:
+        logger.info(
+            f"Starting recursive crawl of {start_url} with "
+            f"depth={'unlimited' if depth is None else depth}, "
+            f"strategy={strategy.value}, "
+            f"limit={'unlimited' if limit is None else limit}"
         )
 
-        with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TaskProgressColumn(),
-        ) as progress:
-            setup_rich_logging(progress)
+        browser_config = BrowserConfig(
+            headless=True,
+            verbose=False,
+            extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
+        )
+        crawl_config = CrawlerRunConfig(
+            cache_mode=CacheMode.BYPASS,
+        )
 
-            task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
+        logger.debug("Initializing web crawler")
 
-            # Setup signal handlers
-            signal.signal(signal.SIGINT, signal_handler)
-            signal.signal(signal.SIGTERM, signal_handler)
+        async with AsyncWebCrawler(config=browser_config) as crawler:
+            crawled_urls: Set[str] = set()
+            to_crawl = [(start_url, 0)]  # (url, depth)
+            base_domain = urlparse(start_url).netloc
+            logger.info(f"Base domain: {base_domain}")
 
-            while to_crawl and not shutdown_event.is_set():
-                # Add limit check
-                if limit is not None and len(crawled_urls) >= limit:
-                    logger.info(f"Reached crawl limit of {limit} pages")
-                    break
+            semaphore = asyncio.Semaphore(max_concurrent)
+            logger.info(f"Set concurrency limit to {max_concurrent}")
 
-                current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
+            from rich.progress import (
+                BarColumn,
+                MofNCompleteColumn,
+                TaskProgressColumn,
+                TextColumn,
+            )
 
-                if depth is not None and current_depth > depth:
-                    logger.info(f"Skipping {current_url}: max depth reached")
-                    continue
+            with Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+            ) as progress:
+                setup_rich_logging(progress)
 
-                if current_url in crawled_urls:
-                    logger.info(f"Skipping {current_url}: already crawled")
-                    continue
+                task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
 
-                if robot_parser and not robot_parser.can_fetch("*", current_url):
-                    logger.info(f"Skipping {current_url}: blocked by robots.txt")
-                    continue
+                # Setup signal handlers
+                signal.signal(signal.SIGINT, signal_handler)
+                signal.signal(signal.SIGTERM, signal_handler)
 
-                if urlparse(current_url).netloc != base_domain:
-                    logger.info(f"Skipping {current_url}: outside base domain")
-                    continue
-
-                async with semaphore:
-                    if shutdown_event.is_set():
+                while to_crawl and not shutdown_event.is_set():
+                    # Add limit check
+                    if limit is not None and len(crawled_urls) >= limit:
+                        logger.info(f"Reached crawl limit of {limit} pages")
                         break
 
-                    logger.info(f"Crawling {current_url} at depth {current_depth}")
-                    try:
-                        result, actual_final_url = await crawl_url(crawler, crawl_config, current_url)
-                        if actual_final_url != current_url:
-                            logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
-                        base_url = actual_final_url
+                    current_url, current_depth = to_crawl.pop(0) if strategy == CrawlStrategy.BFS else to_crawl.pop()
 
-                        # Check for successful status code (2xx range)
-                        if not result.success or (result.status_code and not 200 <= result.status_code < 300):
-                            logger.warning(
-                                f"Skipping {current_url}: HTTP {result.status_code or 'unknown'} - "
-                                f"{result.error_message or 'Unknown error'}"
-                            )
-                            continue
-
-                        # Skip if final URL is outside base domain
-                        if urlparse(base_url).netloc != base_domain:
-                            logger.info(f"Skipping {base_url}: outside base domain after redirect")
-                            continue
-
-                        # Only process and store successful responses
-                        if result.markdown_v2 and result.markdown_v2.raw_markdown:
-                            processed_chunks = await process_and_store_document(
-                                base_url, result.markdown_v2.raw_markdown, progress, task_id
-                            )
-                            progress.update(task_id, advance=1)
-                            logger.info(f"Successfully crawled and stored: {base_url} (redirect from {current_url})")
-                            logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
-                            crawled_urls.add(base_url)
-
-                            # Process internal links only for successfully stored pages
-                            if result.links and "internal" in result.links:
-                                new_urls = 0
-                                for link in result.links["internal"]:
-                                    href = link.get("href", "")
-                                    if not href:
-                                        continue
-
-                                    normalized_url = href.replace(current_url, actual_final_url)
-                                    if normalized_url not in crawled_urls and normalized_url not in [
-                                        url for url, _ in to_crawl
-                                    ]:
-                                        to_crawl.append((normalized_url, current_depth + 1))
-                                        new_urls += 1
-
-                                if new_urls > 0:
-                                    progress.update(task_id, total=len(to_crawl))
-                                    logger.info(f"Found {new_urls} new internal links on {base_url}")
-                        else:
-                            logger.warning(f"No markdown content for {base_url}")
-                            continue
-                    except Exception as e:
-                        logger.error(f"Error crawling {current_url}: {str(e)}")
+                    if depth is not None and current_depth > depth:
+                        logger.info(f"Skipping {current_url}: max depth reached")
                         continue
 
-            if shutdown_event.is_set():
-                logger.info("Shutdown requested, cleaning up...")
-                progress.stop()
-                logger.info("Cleanup complete")
-            else:
-                logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
+                    if current_url in crawled_urls:
+                        logger.info(f"Skipping {current_url}: already crawled")
+                        continue
 
-            # Log final cost summary
-            from .extract import log_cost_summary
+                    if robot_parser and not robot_parser.can_fetch("*", current_url):
+                        logger.info(f"Skipping {current_url}: blocked by robots.txt")
+                        continue
 
-            log_cost_summary()
+                    if urlparse(current_url).netloc != base_domain:
+                        logger.info(f"Skipping {current_url}: outside base domain")
+                        continue
 
-            return crawled_urls
+                    async with semaphore:
+                        if shutdown_event.is_set():
+                            break
+
+                        logger.info(f"Crawling {current_url} at depth {current_depth}")
+                        try:
+                            result, actual_final_url = await crawl_url(crawler, crawl_config, current_url)
+                            if actual_final_url != current_url:
+                                logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
+                            base_url = actual_final_url
+
+                            # Check for successful status code (2xx range)
+                            if not result.success or (result.status_code and not 200 <= result.status_code < 300):
+                                logger.warning(
+                                    f"Skipping {current_url}: HTTP {result.status_code or 'unknown'} - "
+                                    f"{result.error_message or 'Unknown error'}"
+                                )
+                                continue
+
+                            # Skip if final URL is outside base domain
+                            if urlparse(base_url).netloc != base_domain:
+                                logger.info(f"Skipping {base_url}: outside base domain after redirect")
+                                continue
+
+                            # Only process and store successful responses
+                            if result.markdown_v2 and result.markdown_v2.raw_markdown:
+                                processed_chunks = await process_and_store_document(
+                                    base_url, result.markdown_v2.raw_markdown, progress, task_id, connection, logger
+                                )
+                                progress.update(task_id, advance=1)
+                                logger.info(
+                                    f"Successfully crawled and stored: {base_url} (redirect from {current_url})"
+                                )
+                                logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
+                                crawled_urls.add(base_url)
+
+                                # Process internal links only for successfully stored pages
+                                if result.links and "internal" in result.links:
+                                    new_urls = 0
+                                    for link in result.links["internal"]:
+                                        href = link.get("href", "")
+                                        if not href:
+                                            continue
+
+                                        normalized_url = href.replace(current_url, actual_final_url)
+                                        if normalized_url not in crawled_urls and normalized_url not in [
+                                            url for url, _ in to_crawl
+                                        ]:
+                                            to_crawl.append((normalized_url, current_depth + 1))
+                                            new_urls += 1
+
+                                    if new_urls > 0:
+                                        progress.update(task_id, total=len(to_crawl))
+                                        logger.info(f"Found {new_urls} new internal links on {base_url}")
+                            else:
+                                logger.warning(f"No markdown content for {base_url}")
+                                continue
+                        except Exception as e:
+                            logger.error(f"Error crawling {current_url}: {str(e)}")
+                            continue
+
+                if shutdown_event.is_set():
+                    logger.info("Shutdown requested, cleaning up...")
+                    progress.stop()
+                    logger.info("Cleanup complete")
+                else:
+                    logger.info(f"Crawl completed. Processed {len(crawled_urls)} URLs")
+
+                # Log final cost summary
+                from .extract import log_cost_summary
+
+                log_cost_summary()
+
+                return crawled_urls
+    finally:
+        # Close the connection when done
+        await connection.close()
 
 
 async def _get_package_documentation(

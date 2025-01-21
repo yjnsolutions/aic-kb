@@ -105,8 +105,7 @@ async def get_embedding(text: str) -> List[float]:
 
         # Log individual call stats
         logger.info(f"Embedding Generation - Tokens: {total_tokens}, " f"Cost: ${cost:.6f}")
-        # The embedding is directly in response.data[0], no need for .embedding
-        return response.data[0]
+        return response.data[0]["embedding"]
     except Exception as e:
         print(f"Error getting embedding: {e}")
         return [0] * 1536  # Return zero vector on error

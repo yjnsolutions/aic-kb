@@ -14,8 +14,17 @@ from aic_kb.pypi_doc_scraper import (
 )
 
 
+@pytest.fixture
+async def mock_db_connection():
+    """Create a mock asyncpg connection for testing"""
+    mock_conn = AsyncMock()
+    mock_conn.prepare = AsyncMock()
+    mock_conn.prepare.return_value.fetchval = AsyncMock(return_value=1)  # Return dummy ID
+    return mock_conn
+
+
 @pytest.mark.asyncio
-async def test_process_and_store_document(tmp_path):
+async def test_process_and_store_document(mock_db_connection, tmp_path):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -33,7 +42,7 @@ async def test_process_and_store_document(tmp_path):
         content = "# Test Content"
         with Progress() as progress:
             task_id = progress.add_task("Testing", total=1)
-            await process_and_store_document(url, content, progress, task_id)
+            await process_and_store_document(url, content, progress, task_id, mock_db_connection)
 
         # Verify mock calls
         mock_completion.assert_called()
@@ -46,7 +55,7 @@ async def test_process_and_store_document(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_package_documentation():
+async def test_get_package_documentation(mock_db_connection):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -75,7 +84,13 @@ async def test_get_package_documentation():
             # Simulate processing content by calling process_and_store_document
             with Progress() as progress:
                 task_id = progress.add_task("Testing", total=1)
-                await process_and_store_document("https://docs.example.com", "# Test Content", progress, task_id)
+                await process_and_store_document(
+                    "https://docs.example.com",
+                    "# Test Content",
+                    progress,
+                    task_id,
+                    kwargs["connection"],  # Use kwargs['connection'] instead of kwargs.get('connection')
+                )
             return {"https://docs.example.com"}
 
         mock_crawl.side_effect = mock_crawl_with_content
@@ -83,25 +98,30 @@ async def test_get_package_documentation():
         # Test with invalid package
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError
         with pytest.raises(requests.exceptions.HTTPError):
-            await _get_package_documentation("this-package-definitely-does-not-exist")
+            await _get_package_documentation("this-package-definitely-does-not-exist", connection=mock_db_connection)
 
         # Reset mock for valid package test
         mock_response.raise_for_status.side_effect = None
 
         # Test with valid package
-        await _get_package_documentation("requests")
+        await _get_package_documentation("requests", connection=mock_db_connection)
 
         # Verify mock calls
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
         mock_crawl.assert_called_once_with(
-            "https://docs.example.com", None, CrawlStrategy.BFS, None, limit=None  # depth  # robot_parser
+            "https://docs.example.com",
+            None,  # depth
+            CrawlStrategy.BFS,
+            None,  # robot_parser
+            limit=None,
+            connection=mock_db_connection,  # Add connection to verification
         )
         mock_completion.assert_called()
         mock_embedding.assert_called()
 
 
 @pytest.mark.asyncio
-async def test_process_and_store_document_special_chars():
+async def test_process_and_store_document_special_chars(mock_db_connection):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -120,7 +140,7 @@ async def test_process_and_store_document_special_chars():
         content = "# Test Content"
         with Progress() as progress:
             task_id = progress.add_task("Testing", total=1)
-            await process_and_store_document(url, content, progress, task_id)
+            await process_and_store_document(url, content, progress, task_id, mock_db_connection)
 
         # Verify mock calls
         mock_completion.assert_called()
@@ -132,7 +152,7 @@ async def test_process_and_store_document_special_chars():
 
 
 @pytest.mark.asyncio
-async def test_crawl_recursive():
+async def test_crawl_recursive(mock_db_connection):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -169,7 +189,7 @@ async def test_crawl_recursive():
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
-        urls = await crawl_recursive(start_url, depth=None, strategy=CrawlStrategy.BFS)
+        urls = await crawl_recursive(start_url, depth=None, strategy=CrawlStrategy.BFS, connection=mock_db_connection)
         assert start_url in urls
 
         # Add verification of crawler calls
@@ -207,7 +227,7 @@ async def test_crawl_recursive():
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
-        urls = await crawl_recursive(start_url, depth=2, strategy=CrawlStrategy.BFS)
+        urls = await crawl_recursive(start_url, depth=2, strategy=CrawlStrategy.BFS, connection=mock_db_connection)
         assert start_url in urls
 
         # Verify mock calls
@@ -239,7 +259,7 @@ async def test_crawl_recursive():
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
-        urls = await crawl_recursive(start_url, depth=2, strategy=CrawlStrategy.DFS)
+        urls = await crawl_recursive(start_url, depth=2, strategy=CrawlStrategy.DFS, connection=mock_db_connection)
         assert start_url in urls
 
         # Verify mock calls
@@ -248,7 +268,7 @@ async def test_crawl_recursive():
 
 
 @pytest.mark.asyncio
-async def test_robots_txt_handling():
+async def test_robots_txt_handling(mock_db_connection):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -288,12 +308,16 @@ async def test_robots_txt_handling():
 
         # Test blocked URL
         blocked_url = "https://example.com/blocked"
-        urls = await crawl_recursive(blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
+        urls = await crawl_recursive(
+            blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, connection=mock_db_connection
+        )
         assert len(urls) == 0  # Should not crawl blocked URL
         assert mock_completion.call_count == 0
 
         # Test allowed URL
         allowed_url = "https://example.com/docs"
-        urls = await crawl_recursive(allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
+        urls = await crawl_recursive(
+            allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, connection=mock_db_connection
+        )
         assert len(urls) == 1  # Should crawl allowed URL
         assert mock_completion.call_count > 0  # Should have called completion for content processing
