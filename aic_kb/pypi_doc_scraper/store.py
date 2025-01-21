@@ -11,13 +11,43 @@ from rich.progress import Progress, TaskID
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
 
+async def ensure_db_initialized(connection: asyncpg.Connection):
+    """Ensure database is initialized with required tables and functions"""
+    # Read the init_db.sql file
+    init_sql_path = Path(__file__).parent / "init_db.sql"
+    init_sql = init_sql_path.read_text()
+
+    # Execute the initialization SQL
+    await connection.execute(init_sql)
+
+
 async def create_connection():
-    return await asyncpg.connect(
+    connection = await asyncpg.connect(
         user="postgres",  # Replace with actual credentials
         password="mysecretpassword",  # Replace with actual credentials
         database="postgres",  # Replace with actual database name
         host="localhost",  # Replace with actual host
     )
+
+    # Check if table exists before initializing
+    table_exists = await connection.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'site_pages'
+        );
+        """
+    )
+
+    if not table_exists:
+        try:
+            await ensure_db_initialized(connection)
+        except Exception as e:
+            logging.error(f"Error initializing database: {e}")
+            raise
+
+    return connection
 
 
 async def process_and_store_document(
@@ -25,7 +55,6 @@ async def process_and_store_document(
 ) -> List[ProcessedChunk]:
     """
     Store the scraped content in markdown files and process chunks for embeddings.
-
     Args:
         url: The URL of the scraped page
         content: The markdown content to store
@@ -34,6 +63,7 @@ async def process_and_store_document(
         connection: asyncpg Connection instance
         :param logger: logger configured to log to Rich console
     """
+
     from .extract import chunk_text
 
     # Create docs directory if it doesn't exist
