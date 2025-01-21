@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress
 
-from aic_kb.pypi_doc_scraper.store import process_and_store_document, create_connection
+from aic_kb.pypi_doc_scraper.store import create_connection, process_and_store_document
 
 
 def setup_rich_logging(progress=None):
@@ -150,7 +150,7 @@ async def crawl_recursive(
     depth: Optional[int],
     strategy: CrawlStrategy,
     robot_parser: Optional[RobotFileParser] = None,
-    max_concurrent: int = 5,
+    max_concurrent: int = 15,
     limit: Optional[int] = None,
     crawl_cache_enabled: bool = True,
 ) -> Set[str]:
@@ -244,6 +244,9 @@ async def crawl_recursive(
                         logger.info(f"Skipping {current_url}: outside base domain")
                         continue
 
+                    # Only use semaphore for the crawl operation
+                    result = None
+                    actual_final_url = None
                     async with semaphore:
                         if shutdown_event.is_set():
                             break
@@ -253,59 +256,75 @@ async def crawl_recursive(
                             result, actual_final_url = await crawl_url(
                                 crawler, crawl_config, current_url, crawl_cache_enabled
                             )
-                            if actual_final_url != current_url:
-                                logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
-                            base_url = actual_final_url
-
-                            # Check for successful status code (2xx range)
-                            if not result.success or (result.status_code and not 200 <= result.status_code < 300):
-                                logger.warning(
-                                    f"Skipping {current_url}: HTTP {result.status_code or 'unknown'} - "
-                                    f"{result.error_message or 'Unknown error'}"
-                                )
-                                continue
-
-                            # Skip if final URL is outside base domain
-                            if urlparse(base_url).netloc != base_domain:
-                                logger.info(f"Skipping {base_url}: outside base domain after redirect")
-                                continue
-
-                            # Only process and store successful responses
-                            if result.markdown_v2 and result.markdown_v2.raw_markdown:
-                                processed_chunks = await process_and_store_document(
-                                    base_url, result.markdown_v2.raw_markdown, progress, task_id, connection, logger
-                                )
-                                progress.update(task_id, advance=1)
-                                logger.info(
-                                    f"Successfully crawled and stored: {base_url} (redirect from {current_url})"
-                                )
-                                logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
-                                crawled_urls.add(base_url)
-
-                                # Process internal links only for successfully stored pages
-                                if result.links and "internal" in result.links:
-                                    new_urls = 0
-                                    for link in result.links["internal"]:
-                                        href = link.get("href", "")
-                                        if not href:
-                                            continue
-
-                                        # Remove anchor fragments and normalize URL
-                                        normalized_url = href.split('#')[0].replace(current_url, actual_final_url)
-                                        if normalized_url not in crawled_urls and normalized_url not in [
-                                            url for url, _ in to_crawl
-                                        ]:
-                                            to_crawl.append((normalized_url, current_depth + 1))
-                                            new_urls += 1
-
-                                    if new_urls > 0:
-                                        progress.update(task_id, total=len(to_crawl))
-                                        logger.info(f"Found {new_urls} new internal links on {base_url}")
-                            else:
-                                logger.warning(f"No markdown content for {base_url}")
-                                continue
                         except Exception as e:
                             logger.error(f"Error crawling {current_url}: {str(e)}")
+                            continue
+
+                    # Process results outside of semaphore
+                    if result:
+                        if actual_final_url != current_url:
+                            logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
+                        base_url = actual_final_url
+
+                        # Check for successful status code (2xx range)
+                        if not result.success or (result.status_code and not 200 <= result.status_code < 300):
+                            logger.warning(
+                                f"Skipping {current_url}: HTTP {result.status_code or 'unknown'} - "
+                                f"{result.error_message or 'Unknown error'}"
+                            )
+                            continue
+
+                        # Skip if final URL is outside base domain
+                        if urlparse(base_url).netloc != base_domain:
+                            logger.info(f"Skipping {base_url}: outside base domain after redirect")
+                            continue
+
+                        # Only process and store successful responses
+                        if result.markdown_v2 and result.markdown_v2.raw_markdown:
+                            # Process document without semaphore
+                            store_task = asyncio.create_task(
+                                process_and_store_document(
+                                    base_url, result.markdown_v2.raw_markdown, progress, task_id, connection, logger
+                                )
+                            )
+
+                            progress.update(task_id, advance=1)
+                            logger.info(f"Successfully crawled: {base_url} (redirect from {current_url})")
+                            crawled_urls.add(base_url)
+
+                            # Process internal links only for successfully stored pages
+                            if result.links and "internal" in result.links:
+                                new_urls = 0
+
+                                async def process_link(link):
+                                    nonlocal new_urls
+                                    href = link.get("href", "")
+                                    if not href:
+                                        return
+
+                                    # Remove anchor fragments and normalize URL
+                                    normalized_url = href.split("#")[0].replace(current_url, actual_final_url)
+                                    if normalized_url not in crawled_urls and normalized_url not in [
+                                        url for url, _ in to_crawl
+                                    ]:
+                                        to_crawl.append((normalized_url, current_depth + 1))
+                                        new_urls += 1
+
+                                # Process links in parallel batches of 50
+                                batch_size = 50
+                                for i in range(0, len(result.links["internal"]), batch_size):
+                                    batch = result.links["internal"][i : i + batch_size]
+                                    await asyncio.gather(*[process_link(link) for link in batch])
+
+                                if new_urls > 0:
+                                    progress.update(task_id, total=len(to_crawl))
+                                    logger.info(f"Found {new_urls} new internal links on {base_url}")
+
+                            # Wait for document processing to complete
+                            processed_chunks = await store_task
+                            logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
+                        else:
+                            logger.warning(f"No markdown content for {base_url}")
                             continue
 
                 if shutdown_event.is_set():
@@ -321,6 +340,7 @@ async def crawl_recursive(
                 log_cost_summary()
 
                 return crawled_urls
+
     finally:
         # Close the connection when done
         await connection.close()
