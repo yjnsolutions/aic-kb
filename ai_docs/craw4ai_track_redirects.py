@@ -1,7 +1,6 @@
 import asyncio
 
-from crawl4ai import (AsyncWebCrawler, BrowserConfig, CacheMode,
-                      CrawlerRunConfig)
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
 
 

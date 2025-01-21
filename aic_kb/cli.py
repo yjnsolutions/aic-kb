@@ -21,6 +21,7 @@ def get_package_documentation(
     ignore_robots: bool = typer.Option(False, help="Ignore robots.txt rules"),
     embedding_model: str = typer.Option("text-embedding-3-small", help="Model to use for embeddings"),
     limit: Optional[int] = typer.Option(None, help="Maximum number of pages to crawl (None for unlimited)"),
+    disable_crawl_cache: bool = typer.Option(False, help="Disable crawl caching"),
 ):
     """
     Scrape documentation for a Python package and save as markdown files.
@@ -34,7 +35,11 @@ def get_package_documentation(
     # Set embedding model in environment
     os.environ["EMBEDDING_MODEL"] = embedding_model
 
-    asyncio.run(_get_package_documentation(package_name, version, depth, strategy, ignore_robots, limit))
+    asyncio.run(
+        _get_package_documentation(
+            package_name, version, depth, strategy, ignore_robots, limit, crawl_cache_enabled=not disable_crawl_cache
+        )
+    )
 
 
 def build_string(name: str, repeat: int) -> str:

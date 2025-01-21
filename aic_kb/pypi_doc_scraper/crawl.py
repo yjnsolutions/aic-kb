@@ -1,5 +1,8 @@
 import asyncio
+import hashlib
+import json
 import logging
+import os
 import signal
 from enum import Enum
 from typing import Any, Dict, Optional, Set, Tuple
@@ -8,8 +11,7 @@ from urllib.robotparser import RobotFileParser
 
 import asyncpg
 import requests
-from crawl4ai import (AsyncWebCrawler, BrowserConfig, CacheMode,
-                      CrawlerRunConfig)
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
 from rich.console import Console
 from rich.logging import RichHandler
@@ -78,8 +80,39 @@ class URLTracker:
         self.final_urls[original_url] = final_url
 
 
-async def crawl_url(crawler: AsyncWebCrawler, crawl_config: CrawlerRunConfig, url: str) -> Tuple[Any, str]:
+class CachedResult:
+    def __init__(self, data):
+        self.success = data["success"]
+        self.status_code = data["status_code"]
+        self.markdown_v2 = (
+            type("Markdown", (), {"raw_markdown": data["markdown_v2"]["raw_markdown"]})()
+            if data["markdown_v2"]
+            else None
+        )
+        self.links = data["links"]
+        self.error_message = data["error_message"]
+
+
+async def crawl_url(
+    crawler: AsyncWebCrawler, crawl_config: CrawlerRunConfig, url: str, cache_enabled: bool
+) -> Tuple[Any, str]:
     final_url = None
+    cache_dir = ".crawl_cache"
+    cache_file = os.path.join(cache_dir, hashlib.sha256(url.encode()).hexdigest() + ".json")
+
+    # Check cache if enabled
+    if cache_enabled:
+        os.makedirs(cache_dir, exist_ok=True)
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file) as f:
+                    cached_data = json.load(f)
+                    logger.info(f"Crawl cache HIT for {url}")
+                    return CachedResult(cached_data["result"]), cached_data["final_url"]
+            except Exception as e:
+                logger.warning(f"Cache read error for {url}: {e}")
+
+    logger.info(f"Crawl cache MISS for {url}")
 
     async def capture_final_url(page: Page, context: BrowserContext, **kwargs):
         nonlocal final_url
@@ -93,6 +126,23 @@ async def crawl_url(crawler: AsyncWebCrawler, crawl_config: CrawlerRunConfig, ur
     if final_url is None:
         final_url = url
 
+    # Store in cache if enabled
+    if cache_enabled:
+        try:
+            # Create a simplified version of the result for caching
+            cacheable_result = {
+                "success": result.success if hasattr(result, "success") else True,
+                "status_code": result.status_code if hasattr(result, "status_code") else 200,
+                "markdown_v2": {"raw_markdown": result.markdown_v2.raw_markdown if result.markdown_v2 else None},
+                "links": result.links if hasattr(result, "links") else None,
+                "error_message": result.error_message if hasattr(result, "error_message") else None,
+            }
+
+            with open(cache_file, "w") as f:
+                json.dump({"result": cacheable_result, "final_url": final_url}, f)
+        except Exception as e:
+            logger.warning(f"Cache write error for {url}: {e}")
+
     return result, final_url
 
 
@@ -103,6 +153,7 @@ async def crawl_recursive(
     robot_parser: Optional[RobotFileParser] = None,
     max_concurrent: int = 5,
     limit: Optional[int] = None,
+    crawl_cache_enabled: bool = True,
 ) -> Set[str]:
     """
     Recursively crawl a website starting from a URL.
@@ -154,8 +205,12 @@ async def crawl_recursive(
             semaphore = asyncio.Semaphore(max_concurrent)
             logger.info(f"Set concurrency limit to {max_concurrent}")
 
-            from rich.progress import (BarColumn, MofNCompleteColumn,
-                                       TaskProgressColumn, TextColumn)
+            from rich.progress import (
+                BarColumn,
+                MofNCompleteColumn,
+                TaskProgressColumn,
+                TextColumn,
+            )
 
             with Progress(
                 TextColumn("[progress.description]{task.description}"),
@@ -201,7 +256,9 @@ async def crawl_recursive(
 
                         logger.info(f"Crawling {current_url} at depth {current_depth}")
                         try:
-                            result, actual_final_url = await crawl_url(crawler, crawl_config, current_url)
+                            result, actual_final_url = await crawl_url(
+                                crawler, crawl_config, current_url, crawl_cache_enabled
+                            )
                             if actual_final_url != current_url:
                                 logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
                             base_url = actual_final_url
@@ -281,6 +338,7 @@ async def _get_package_documentation(
     strategy: str = "bfs",
     ignore_robots: bool = False,
     limit: Optional[int] = None,
+    crawl_cache_enabled: bool = True,
 ) -> None:
     """
     setup_rich_logging()
@@ -336,7 +394,9 @@ async def _get_package_documentation(
     crawl_strat = CrawlStrategy.BFS if strategy.lower() == "bfs" else CrawlStrategy.DFS
     logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
     try:
-        await crawl_recursive(documentation_url, depth, crawl_strat, robot_parser, limit=limit)
+        await crawl_recursive(
+            documentation_url, depth, crawl_strat, robot_parser, limit=limit, crawl_cache_enabled=crawl_cache_enabled
+        )
     except Exception as e:
         logger.error(f"Error during documentation crawl: {str(e)}")
         if not shutdown_event.is_set():
