@@ -8,6 +8,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aider-chat" },
     { name = "crawl4ai" },
+    { name = "litellm" },
     { name = "pytest" },
     { name = "rich" },
     { name = "typer" },
@@ -30,6 +31,7 @@ dev = [
 requires-dist = [
     { name = "aider-chat", specifier = ">=0.71.1" },
     { name = "crawl4ai", specifier = ">=0.4.24" },
+    { name = "litellm", specifier = ">=1.53.9" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "rich", specifier = ">=13.9.4" },
     { name = "typer", specifier = ">=0.15.1" },
