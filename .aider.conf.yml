@@ -291,7 +291,7 @@ lint-cmd:
 auto-lint: true
 
 ## Specify command to run tests
-test-cmd: uv run pytest -v tests/
+test-cmd: uv run pytest -v --disable-warnings tests/
 
 ## Enable/disable automatic testing after changes (default: False)
 auto-test: true

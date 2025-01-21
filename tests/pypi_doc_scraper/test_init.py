@@ -18,14 +18,18 @@ from aic_kb.pypi_doc_scraper import (
 async def test_process_and_store_document(tmp_path):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))]
-    
+    mock_completion_response.choices = [
+        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
+    ]
+
     mock_embedding_response = AsyncMock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-    
-    with patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion, \
-         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding:
-        
+
+    with (
+        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
+        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
+    ):
+
         url = "https://example.com/docs/page"
         content = "# Test Content"
         with Progress() as progress:
@@ -35,7 +39,7 @@ async def test_process_and_store_document(tmp_path):
         # Verify mock calls
         mock_completion.assert_called()
         mock_embedding.assert_called()
-        
+
         # Verify file was created
         output_file = Path("docs/docs_page.md")
         assert output_file.exists()
@@ -46,18 +50,22 @@ async def test_process_and_store_document(tmp_path):
 async def test_get_package_documentation():
     # Mock litellm responses
     mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))]
-    
+    mock_completion_response.choices = [
+        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
+    ]
+
     mock_embedding_response = AsyncMock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-    
+
     # Mock the PyPI response
     mock_pypi_data = {"info": {"project_urls": {"Documentation": "https://docs.example.com"}}}
 
-    with patch("litellm.acompletion", return_value=mock_completion_response), \
-         patch("litellm.aembedding", return_value=mock_embedding_response), \
-         patch("requests.get") as mock_get, \
-         patch("aic_kb.pypi_doc_scraper.crawl_recursive") as mock_crawl:
+    with (
+        patch("litellm.acompletion", return_value=mock_completion_response),
+        patch("litellm.aembedding", return_value=mock_embedding_response),
+        patch("requests.get") as mock_get,
+        patch("aic_kb.pypi_doc_scraper.crawl_recursive") as mock_crawl,
+    ):
         # Configure mock PyPI response
         mock_response = Mock()
         mock_response.json.return_value = mock_pypi_data
@@ -76,15 +84,11 @@ async def test_get_package_documentation():
 
         # Test with valid package
         await _get_package_documentation("requests")
-        
+
         # Verify mock calls
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
         mock_crawl.assert_called_once_with(
-            "https://docs.example.com",
-            None,  # depth
-            CrawlStrategy.BFS,
-            None,  # robot_parser
-            limit=None
+            "https://docs.example.com", None, CrawlStrategy.BFS, None, limit=None  # depth  # robot_parser
         )
 
 
@@ -92,14 +96,18 @@ async def test_get_package_documentation():
 async def test_process_and_store_document_special_chars():
     # Mock litellm responses
     mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))]
-    
+    mock_completion_response.choices = [
+        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
+    ]
+
     mock_embedding_response = AsyncMock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-    
-    with patch("litellm.acompletion", return_value=mock_completion_response), \
-         patch("litellm.aembedding", return_value=mock_embedding_response):
-        
+
+    with (
+        patch("litellm.acompletion", return_value=mock_completion_response),
+        patch("litellm.aembedding", return_value=mock_embedding_response),
+    ):
+
         # Test URL with special characters
         url = "https://example.com/docs/page?with=params#fragment"
         content = "# Test Content"
@@ -116,23 +124,29 @@ async def test_process_and_store_document_special_chars():
 async def test_crawl_recursive():
     # Mock litellm responses
     mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))]
-    
+    mock_completion_response.choices = [
+        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
+    ]
+
     mock_embedding_response = AsyncMock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-    
+
     start_url = "https://example.com/docs"
 
     # Test unlimited depth
-    with patch("litellm.acompletion", return_value=mock_completion_response), \
-         patch("litellm.aembedding", return_value=mock_embedding_response), \
-         patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler:
+    with (
+        patch("litellm.acompletion", return_value=mock_completion_response),
+        patch("litellm.aembedding", return_value=mock_embedding_response),
+        patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler,
+    ):
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+
         async def mock_aexit(*args):
             await mock_instance.close()
             return None
+
         mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
@@ -146,7 +160,7 @@ async def test_crawl_recursive():
 
         urls = await crawl_recursive(start_url, depth=None, strategy=CrawlStrategy.BFS)
         assert start_url in urls
-        
+
         # Add verification of crawler calls
         mock_crawler.assert_called_once()
         mock_instance = mock_crawler.return_value
@@ -158,9 +172,11 @@ async def test_crawl_recursive():
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+
         async def mock_aexit(*args):
             await mock_instance.close()
             return None
+
         mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
@@ -180,9 +196,11 @@ async def test_crawl_recursive():
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+
         async def mock_aexit(*args):
             await mock_instance.close()
             return None
+
         mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
@@ -202,27 +220,33 @@ async def test_crawl_recursive():
 async def test_robots_txt_handling():
     # Mock litellm responses
     mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))]
-    
+    mock_completion_response.choices = [
+        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
+    ]
+
     mock_embedding_response = AsyncMock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-    
+
     start_url = "https://example.com/docs"
 
     # Test with robots.txt blocking
     robot_parser = RobotFileParser()
     robot_parser.parse(["User-agent: *", "Disallow: /docs"])
 
-    with patch("litellm.acompletion", return_value=mock_completion_response), \
-         patch("litellm.aembedding", return_value=mock_embedding_response), \
-         patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler:
+    with (
+        patch("litellm.acompletion", return_value=mock_completion_response),
+        patch("litellm.aembedding", return_value=mock_embedding_response),
+        patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler,
+    ):
         # Create mock instance with async methods
         mock_instance = Mock()
         # Add async context manager methods
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+
         async def mock_aexit(*args):
             await mock_instance.close()
             return None
+
         mock_instance.__aexit__ = AsyncMock(side_effect=mock_aexit)
         mock_instance.start = AsyncMock()
         mock_instance.arun = AsyncMock()
