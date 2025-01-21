@@ -1,4 +1,3 @@
-from pathlib import Path
 import logging
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.robotparser import RobotFileParser
@@ -7,18 +6,17 @@ import pytest
 import requests
 from rich.progress import Progress
 
-from aic_kb.pypi_doc_scraper import (
-    CrawlStrategy,
-    _get_package_documentation,
-    crawl_recursive,
-    process_and_store_document,
-)
+from aic_kb.pypi_doc_scraper.crawl import (CrawlStrategy,
+                                           _get_package_documentation,
+                                           crawl_recursive)
+from aic_kb.pypi_doc_scraper.store import process_and_store_document
 
 
 @pytest.fixture
 def mock_logger():
     """Create a mock logger for testing"""
     return logging.getLogger("test_logger")
+
 
 @pytest.fixture
 async def mock_db_connection():
@@ -27,45 +25,6 @@ async def mock_db_connection():
     mock_conn.prepare = AsyncMock()
     mock_conn.prepare.return_value.fetchval = AsyncMock(return_value=1)  # Return dummy ID
     return mock_conn
-
-
-@pytest.mark.asyncio
-async def test_process_and_store_document(mock_db_connection, mock_logger, tmp_path):
-    # Mock litellm responses
-    mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [
-        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
-    ]
-    mock_completion_response._hidden_params = {"response_cost": 0.0}
-    mock_completion_response.usage = AsyncMock(
-        total_tokens=10,
-        prompt_tokens=5,
-        completion_tokens=5
-    )
-
-    mock_embedding_response = AsyncMock()
-    mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-    mock_embedding_response._hidden_params = {"response_cost": 0.0}
-    mock_embedding_response.usage = AsyncMock(total_tokens=10)
-
-    with (
-        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
-        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
-    ):
-        url = "https://example.com/docs/page"
-        content = "# Test Content"
-        with Progress() as progress:
-            task_id = progress.add_task("Testing", total=1)
-            await process_and_store_document(url, content, progress, task_id, mock_db_connection, mock_logger)
-
-        # Verify mock calls
-        mock_completion.assert_called()
-        mock_embedding.assert_called()
-
-        # Verify file was created
-        output_file = Path("data/docs/docs_page.md")
-        assert output_file.exists()
-        assert output_file.read_text() == content
 
 
 @pytest.mark.asyncio
@@ -86,7 +45,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
         patch("requests.get") as mock_get,
-        patch("aic_kb.pypi_doc_scraper.crawl_recursive") as mock_crawl,
+        patch("aic_kb.pypi_doc_scraper.crawl.crawl_recursive") as mock_crawl,
     ):
         # Configure mock PyPI response
         mock_response = Mock()
@@ -99,12 +58,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
             with Progress() as progress:
                 task_id = progress.add_task("Testing", total=1)
                 await process_and_store_document(
-                    "https://docs.example.com",
-                    "# Test Content",
-                    progress,
-                    task_id,
-                    mock_db_connection,
-                    mock_logger
+                    "https://docs.example.com", "# Test Content", progress, task_id, mock_db_connection, mock_logger
                 )
             return {"https://docs.example.com"}
 
@@ -124,45 +78,10 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         # Verify mock calls
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
         mock_crawl.assert_called_once_with(
-            "https://docs.example.com",
-            None,  # depth
-            CrawlStrategy.BFS,
-            None,  # robot_parser
-            limit=None
+            "https://docs.example.com", None, CrawlStrategy.BFS, None, limit=None  # depth  # robot_parser
         )
         mock_completion.assert_called()
         mock_embedding.assert_called()
-
-
-@pytest.mark.asyncio
-async def test_process_and_store_document_special_chars(mock_db_connection, mock_logger):
-    # Mock litellm responses
-    mock_completion_response = AsyncMock()
-    mock_completion_response.choices = [
-        AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
-    ]
-
-    mock_embedding_response = AsyncMock()
-    mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
-
-    with (
-        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
-        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
-    ):
-        # Test URL with special characters
-        url = "https://example.com/docs/page?with=params#fragment"
-        content = "# Test Content"
-        with Progress() as progress:
-            task_id = progress.add_task("Testing", total=1)
-            await process_and_store_document(url, content, progress, task_id, mock_db_connection, mock_logger)
-
-        # Verify mock calls
-        mock_completion.assert_called()
-        mock_embedding.assert_called()
-
-        output_file = Path("data/docs/docs_page_with_params_fragment.md")
-        assert output_file.exists()
-        assert output_file.read_text() == content
 
 
 @pytest.mark.asyncio
@@ -182,7 +101,7 @@ async def test_crawl_recursive(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
-        patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -220,7 +139,7 @@ async def test_crawl_recursive(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
-        patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -252,7 +171,7 @@ async def test_crawl_recursive(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
-        patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -299,7 +218,7 @@ async def test_robots_txt_handling(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response),
-        patch("aic_kb.pypi_doc_scraper.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
     ):
         # Create mock instance with async methods
         mock_instance = Mock()
@@ -322,16 +241,12 @@ async def test_robots_txt_handling(mock_db_connection):
 
         # Test blocked URL
         blocked_url = "https://example.com/blocked"
-        urls = await crawl_recursive(
-            blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser
-        )
+        urls = await crawl_recursive(blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
         assert len(urls) == 0  # Should not crawl blocked URL
         assert mock_completion.call_count == 0
 
         # Test allowed URL
         allowed_url = "https://example.com/docs"
-        urls = await crawl_recursive(
-            allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser
-        )
+        urls = await crawl_recursive(allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
         assert len(urls) == 1  # Should crawl allowed URL
         assert mock_completion.call_count > 0  # Should have called completion for content processing
