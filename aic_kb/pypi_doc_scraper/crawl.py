@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress
 
-from aic_kb.pypi_doc_scraper.store import process_and_store_document
+from aic_kb.pypi_doc_scraper.store import process_and_store_document, create_connection
 
 
 def setup_rich_logging(progress=None):
@@ -170,12 +170,7 @@ async def crawl_recursive(
         Set of successfully crawled URLs
     """
     # Create database connection
-    connection = await asyncpg.connect(
-        user="postgres",  # Replace with actual credentials
-        password="mysecretpassword",  # Replace with actual credentials
-        database="postgres",  # Replace with actual database name
-        host="localhost",  # Replace with actual host
-    )
+    connection = await create_connection()
 
     try:
         logger.info(

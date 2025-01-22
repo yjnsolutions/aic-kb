@@ -1,8 +1,12 @@
 import asyncio
+import json
 import os
 from typing import Optional
 
+import asyncpg
 import typer
+from aic_kb.pypi_doc_scraper.extract import get_embedding
+from aic_kb.pypi_doc_scraper.store import create_connection
 
 app = typer.Typer()
 
@@ -44,6 +48,49 @@ def get_package_documentation(
 
 def build_string(name: str, repeat: int) -> str:
     return name * repeat
+
+
+@app.command()
+def search(
+    text: str,
+    match_count: int = typer.Option(5, help="Number of matches to return"),
+    connection_string: str = typer.Option(
+        "postgresql://postgres:postgres@localhost:5432/aic_kb",
+        help="PostgreSQL connection string"
+    )
+):
+    """
+    Search the documentation database using semantic similarity.
+    
+    Returns the most relevant documentation chunks for the given search text.
+    """
+    async def _search():
+        # Get embedding for search text
+        embedding = await get_embedding(text)
+        
+        # Connect to database
+        conn = await create_connection()
+        try:
+            # Search for matches using the match_site_pages function
+            results = await conn.fetch(
+                "SELECT * FROM match_site_pages($1, $2)",
+                json.dumps(embedding, separators=(",", ":")),
+                match_count
+            )
+            
+            # Print results
+            for i, row in enumerate(results, 1):
+                typer.echo(f"\n=== Match {i} (Similarity: {row['similarity']:.3f}) ===")
+                typer.echo(f"Title: {row['title']}")
+                typer.echo(f"URL: {row['url']}")
+                typer.echo(f"Summary: {row['summary']}")
+                typer.echo(f"\nContent:\n{row['content']}...")
+                typer.echo("-" * 80)
+                
+        finally:
+            await conn.close()
+
+    asyncio.run(_search())
 
 
 def main():
