@@ -1,14 +1,20 @@
+import hashlib
 import logging
+import os
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.robotparser import RobotFileParser
 
 import pytest
 import requests
+from crawl4ai import CrawlerRunConfig
 from rich.progress import Progress
 
-from aic_kb.pypi_doc_scraper.crawl import (CrawlStrategy,
-                                           _get_package_documentation,
-                                           crawl_recursive)
+from aic_kb.pypi_doc_scraper.crawl import (
+    CrawlStrategy,
+    _get_package_documentation,
+    crawl_recursive,
+    crawl_url,
+)
 from aic_kb.pypi_doc_scraper.store import process_and_store_document
 
 
@@ -78,7 +84,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         # Verify mock calls
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
         mock_crawl.assert_called_once_with(
-            "https://docs.example.com", None, CrawlStrategy.BFS, None, limit=None  # depth  # robot_parser
+            "https://docs.example.com", None, CrawlStrategy.BFS, None, limit=None, crawl_cache_enabled=True
         )
         mock_completion.assert_called()
         mock_embedding.assert_called()
@@ -250,3 +256,53 @@ async def test_robots_txt_handling(mock_db_connection):
         urls = await crawl_recursive(allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
         assert len(urls) == 1  # Should crawl allowed URL
         assert mock_completion.call_count > 0  # Should have called completion for content processing
+
+
+@pytest.mark.asyncio
+async def test_crawl_url_caching(mock_db_connection):
+    """Test the caching functionality of crawl_url"""
+    url = "https://example.com/test"
+    cache_dir = ".crawl_cache"
+    cache_file = os.path.join(cache_dir, hashlib.sha256(url.encode()).hexdigest() + ".json")
+
+    # Clean up any existing cache
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+
+    with patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler:
+        # Setup mock crawler
+        mock_instance = AsyncMock()
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock()
+        mock_instance.arun = AsyncMock()
+
+        # Create a mock response as a simple object with attributes
+        class MockResponse:
+            def __init__(self):
+                self.success = True
+                self.status_code = 200
+                self.markdown_v2 = type("", (), {"raw_markdown": "test content"})()
+                self.links = {"internal": []}
+                self.error_message = None
+
+        mock_response = MockResponse()
+        mock_instance.arun.return_value = mock_response
+        mock_instance.crawler_strategy = Mock()
+        mock_crawler.return_value = mock_instance
+
+        # First request - should create cache
+        config = CrawlerRunConfig()
+        result1, url1 = await crawl_url(mock_instance, config, url, cache_enabled=True)
+
+        # Verify cache was created
+        assert os.path.exists(cache_file)
+
+        # Second request - should use cache
+        result2, url2 = await crawl_url(mock_instance, config, url, cache_enabled=True)
+
+        # Verify crawler was only called once
+        assert mock_instance.arun.call_count == 1
+
+        # Cleanup
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
