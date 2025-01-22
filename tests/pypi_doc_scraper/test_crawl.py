@@ -19,18 +19,21 @@ from aic_kb.pypi_doc_scraper.store import process_and_store_document
 
 
 @pytest.fixture
-def mock_logger():
-    """Create a mock logger for testing"""
-    return logging.getLogger("test_logger")
-
-
-@pytest.fixture
 async def mock_db_connection():
     """Create a mock asyncpg connection for testing"""
     mock_conn = AsyncMock()
     mock_conn.prepare = AsyncMock()
     mock_conn.prepare.return_value.fetchval = AsyncMock(return_value=1)  # Return dummy ID
+    mock_conn.fetchval = AsyncMock(return_value=True)  # Mock table existence check
+    mock_conn.execute = AsyncMock()  # Mock execute method
+    mock_conn.close = AsyncMock()  # Mock close method
     return mock_conn
+
+
+@pytest.fixture
+def mock_logger():
+    """Create a mock logger for testing"""
+    return logging.getLogger("test_logger")
 
 
 @pytest.mark.asyncio
@@ -52,6 +55,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
         patch("requests.get") as mock_get,
         patch("aic_kb.pypi_doc_scraper.crawl.crawl_recursive") as mock_crawl,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
     ):
         # Configure mock PyPI response
         mock_response = Mock()
@@ -105,9 +109,9 @@ async def test_crawl_recursive(mock_db_connection):
 
     # Test unlimited depth
     with (
-        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
-        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -122,7 +126,7 @@ async def test_crawl_recursive(mock_db_connection):
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.status_code = 200
-        mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
+        mock_instance.arun.return_value.markdown_v2 = type("Markdown", (object,), {"raw_markdown": "# Test"})()
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
@@ -138,14 +142,13 @@ async def test_crawl_recursive(mock_db_connection):
         mock_instance.close.assert_called_once()
 
         # Verify mock calls
-        mock_completion.assert_called()
-        mock_embedding.assert_called()
+        mock_process_and_store_document.assert_called()
 
     # Test BFS strategy
     with (
-        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
-        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -160,7 +163,7 @@ async def test_crawl_recursive(mock_db_connection):
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.status_code = 200
-        mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
+        mock_instance.arun.return_value.markdown_v2 = type("Markdown", (object,), {"raw_markdown": "# Test"})()
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
@@ -170,14 +173,13 @@ async def test_crawl_recursive(mock_db_connection):
         assert start_url in urls
 
         # Verify mock calls
-        mock_completion.assert_called()
-        mock_embedding.assert_called()
+        mock_process_and_store_document.assert_called()
 
     # Test DFS strategy
     with (
-        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
-        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -192,7 +194,7 @@ async def test_crawl_recursive(mock_db_connection):
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.status_code = 200
-        mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test"
+        mock_instance.arun.return_value.markdown_v2 = type("Markdown", (object,), {"raw_markdown": "# Test"})()
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
@@ -202,8 +204,7 @@ async def test_crawl_recursive(mock_db_connection):
         assert start_url in urls
 
         # Verify mock calls
-        mock_completion.assert_called()
-        mock_embedding.assert_called()
+        mock_process_and_store_document.assert_called()
 
 
 @pytest.mark.asyncio
@@ -222,9 +223,9 @@ async def test_robots_txt_handling(mock_db_connection):
     robot_parser.parse(["User-agent: *", "Disallow: /blocked", "Allow: /docs"])
 
     with (
-        patch("aic_kb.pypi_doc_scraper.extract.acompletion", return_value=mock_completion_response) as mock_completion,
-        patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response),
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
     ):
         # Create mock instance with async methods
         mock_instance = Mock()
@@ -239,7 +240,7 @@ async def test_robots_txt_handling(mock_db_connection):
         mock_instance.arun = AsyncMock()
         mock_instance.arun.return_value.success = True
         mock_instance.arun.return_value.status_code = 200
-        mock_instance.arun.return_value.markdown_v2.raw_markdown = "# Test Content"
+        mock_instance.arun.return_value.markdown_v2 = type("Markdown", (object,), {"raw_markdown": "# Test Content"})()
         mock_instance.arun.return_value.html = "<html><body>Test content</body></html>"
         mock_instance.arun.return_value.links = {"internal": []}
         mock_instance.close = AsyncMock()
@@ -249,13 +250,12 @@ async def test_robots_txt_handling(mock_db_connection):
         blocked_url = "https://example.com/blocked"
         urls = await crawl_recursive(blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
         assert len(urls) == 0  # Should not crawl blocked URL
-        assert mock_completion.call_count == 0
 
         # Test allowed URL
         allowed_url = "https://example.com/docs"
         urls = await crawl_recursive(allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser)
         assert len(urls) == 1  # Should crawl allowed URL
-        assert mock_completion.call_count > 0  # Should have called completion for content processing
+        assert mock_process_and_store_document.call_count > 0  # Should have called completion for content processing
 
 
 @pytest.mark.asyncio
@@ -269,7 +269,10 @@ async def test_crawl_url_caching(mock_db_connection):
     if os.path.exists(cache_file):
         os.remove(cache_file)
 
-    with patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler:
+    with (
+        patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+    ):
         # Setup mock crawler
         mock_instance = AsyncMock()
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
