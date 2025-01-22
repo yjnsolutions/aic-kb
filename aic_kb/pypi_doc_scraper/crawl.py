@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
-import asyncpg
 import requests
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
@@ -291,7 +290,8 @@ async def crawl_recursive(
                                         if not href:
                                             continue
 
-                                        normalized_url = href.replace(current_url, actual_final_url)
+                                        # Remove anchor fragments and normalize URL
+                                        normalized_url = href.split('#')[0].replace(current_url, actual_final_url)
                                         if normalized_url not in crawled_urls and normalized_url not in [
                                             url for url, _ in to_crawl
                                         ]:
