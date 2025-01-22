@@ -20,6 +20,7 @@ create table site_pages (
 );
 
 -- Create an index for better vector similarity search performance
+-- WARNING: You want at least 1000 vectors for an IVFFlat index to be effective, otherwise recall will be poor
 create index on site_pages using ivfflat (embedding vector_cosine_ops);
 
 -- Create an index on metadata for faster filtering
