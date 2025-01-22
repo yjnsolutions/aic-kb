@@ -82,6 +82,7 @@ def search(
                 typer.echo(f"Title: {row['title']}")
                 typer.echo(f"URL: {row['url']}")
                 typer.echo(f"Summary: {row['summary']}")
+                typer.echo(f"Chunk #: {row['chunk_number']}")
                 typer.echo(f"\nContent:\n{row['content']}...")
                 typer.echo("-" * 80)
 
