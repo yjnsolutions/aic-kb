@@ -3,6 +3,11 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 
+class TitleAndSummary(BaseModel):
+    title: str
+    summary: str
+
+
 class CrawlUrlResult(BaseModel):
     content: Optional[str]
     final_url: str

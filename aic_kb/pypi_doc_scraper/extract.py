@@ -3,7 +3,8 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import List
+from aic_kb.pypi_doc_scraper.types import TitleAndSummary
 from urllib.parse import urlparse
 
 from litellm import acompletion, aembedding
@@ -50,7 +51,7 @@ class CostTracker:
 cost_tracker = CostTracker()
 
 
-async def get_title_and_summary(chunk: str, url: str, cache_enabled: bool = True) -> Dict[str, str]:
+async def get_title_and_summary(chunk: str, url: str, cache_enabled: bool = True) -> TitleAndSummary:
     """Extract title and summary using GPT-4."""
     cache_dir = ".title_and_summary_cache"
     cache_file = os.path.join(cache_dir, hashlib.sha256(f"{url}:{chunk}".encode()).hexdigest() + ".json")
@@ -63,7 +64,7 @@ async def get_title_and_summary(chunk: str, url: str, cache_enabled: bool = True
                 with open(cache_file) as f:
                     cached_result = json.load(f)
                     logger.info(f"Title/Summary cache HIT for {url}")
-                    return cached_result
+                    return TitleAndSummary(**cached_result)
             except Exception as e:
                 logger.warning(f"Cache read error for title/summary {url}: {e}")
 
@@ -96,19 +97,20 @@ async def get_title_and_summary(chunk: str, url: str, cache_enabled: bool = True
             f"Cost: ${cost:.6f}"
         )
         result = json.loads(response.choices[0].message.content)
+        title_and_summary = TitleAndSummary(**result)
 
         # Store in cache if enabled
         if cache_enabled:
             try:
                 with open(cache_file, "w") as f:
-                    json.dump(result, f)
+                    json.dump(title_and_summary.model_dump(), f)
             except Exception as e:
                 logger.warning(f"Cache write error for title/summary {url}: {e}")
 
-        return result
+        return title_and_summary
     except Exception as e:
         logger.warning(f"Error getting title and summary: {e}")
-        return {"title": "Error processing title", "summary": "Error processing summary"}
+        return TitleAndSummary(title="Error processing title", summary="Error processing summary")
 
 
 async def get_embedding(text: str, cache_enabled: bool = True) -> List[float]:
@@ -173,8 +175,8 @@ async def process_chunk(chunk: str, chunk_number: int, url: str, cache_enabled: 
     return ProcessedChunk(
         url=url,
         chunk_number=chunk_number,
-        title=extracted["title"],
-        summary=extracted["summary"],
+        title=extracted.title,
+        summary=extracted.summary,
         content=chunk,  # Store the original chunk content
         metadata=metadata,
         embedding=embedding,
