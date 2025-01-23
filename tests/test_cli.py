@@ -31,7 +31,7 @@ def test_get_package_documentation():
         assert result.exit_code == 0
 
         # Verify the mock was called with correct arguments
-        mock_get_docs.assert_called_once_with("requests", None, None, "bfs", False, None, crawl_cache_enabled=True)
+        mock_get_docs.assert_called_once_with("requests", None, None, "bfs", False, None, caching_enabled=True)
 
         # Test with all optional parameters
         result = runner.invoke(
@@ -48,10 +48,10 @@ def test_get_package_documentation():
                 "--ignore-robots",
                 "--limit",
                 "10",
-                "--disable-crawl-cache",
+                "--disable-caching",
             ],
         )
         assert result.exit_code == 0
 
         # Verify the second call with all parameters
-        mock_get_docs.assert_called_with("requests", "2.31.0", 2, "dfs", True, 10, crawl_cache_enabled=False)
+        mock_get_docs.assert_called_with("requests", "2.31.0", 2, "dfs", True, 10, caching_enabled=False)
