@@ -317,7 +317,7 @@ async def test_crawl_url_caching(mock_db_connection_pool):
                 "links": self.links,
                 "error_message": self.error_message,
                 "url": self.url,
-                "html": self.html
+                "html": self.html,
             }
 
         mock_response = MockResponse()
