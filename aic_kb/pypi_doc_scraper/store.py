@@ -27,13 +27,13 @@ async def ensure_db_initialized(connection: asyncpg.Connection):
 
 async def create_connection_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(
-        user=os.getenv("POSTGRES_USER", "postgres"),
-        password=os.getenv("POSTGRES_PASSWORD", "mysecretpassword"),
-        database=os.getenv("POSTGRES_DB", "postgres"),
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=int(os.getenv("POSTGRES_PORT", "5432")),
-        min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "4")),
-        max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "8")),
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+        database=os.environ["POSTGRES_DB"],
+        host=os.environ["POSTGRES_HOST"],
+        port=int(os.environ["POSTGRES_PORT"]),
+        min_size=int(os.environ["POSTGRES_POOL_MIN_SIZE"]),
+        max_size=int(os.environ["POSTGRES_POOL_MAX_SIZE"]),
     )
 
     async with pool.acquire() as connection:

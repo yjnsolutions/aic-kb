@@ -9,32 +9,33 @@ Data is crawled with Crawl4AI, then put in a local postgres database with embedd
 
 1. Clone this repository
 2. Install dependencies using [uv](https://docs.astral.sh/uv/getting-started/installation/):
-```bash
+```fish
 uv sync
 ```
+3. Install [direnv](https://direnv.net/docs/installation.html) and https://direnv.net/man/direnv.toml.1.html#codeloaddotenvcode to load the `.env` file.
 
 ## Usage
 
 First, create a `.env` file from template and adjust values if needed:
 
-```bash
+```fish
 cp .env.template .env
 ```
 
 Then run database container (data is persisted on host):
-```bash
+```fish
 docker run --name aic-kb \
-  -p 127.0.0.1:${POSTGRES_PORT}:5432 \
+  -p 127.0.0.1:$POSTGRES_PORT:5432 \
   --volume $PWD/data/postgres:/var/lib/postgresql/data \
-  -e POSTGRES_PASSWORD=${POSTGRES_PASSWORD} \
-  -e POSTGRES_USER=${POSTGRES_USER} \
-  -e POSTGRES_DB=${POSTGRES_DB} \
+  -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  -e POSTGRES_USER="$POSTGRES_USER" \
+  -e POSTGRES_DB="$POSTGRES_DB" \
   -d pgvector/pgvector:pg17
 ```
 
 The package provides a CLI command `aic-kb`. Basic usage:
 
-```bash
+```fish
 aic-kb get-package-documentation requests --version 2.31.0 --limit 3
 ```
 
@@ -43,6 +44,6 @@ aic-kb get-package-documentation requests --version 2.31.0 --limit 3
 
 To connect to DB:
 
-```bash
-docker exec -ti aic-kb psql -U postgres
+```fish
+docker exec -ti aic-kb psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
