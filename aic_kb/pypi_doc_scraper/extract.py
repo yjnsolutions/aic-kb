@@ -1,12 +1,13 @@
 import json
 import logging
 import os
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Dict, List
 from urllib.parse import urlparse
 
 from litellm import acompletion, aembedding
+
+from aic_kb.pypi_doc_scraper.types import ProcessedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +47,6 @@ class CostTracker:
 
 # Create global cost tracker instance
 cost_tracker = CostTracker()
-
-
-@dataclass
-class ProcessedChunk:
-    url: str
-    chunk_number: int
-    title: str
-    summary: str
-    content: str
-    metadata: Dict[str, Any]
-    embedding: List[float]
 
 
 async def get_title_and_summary(chunk: str, url: str) -> Dict[str, str]:
