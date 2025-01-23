@@ -43,7 +43,8 @@ async def test_process_and_store_document(mock_db_connection, mock_logger, tmp_p
     ):
         url = "https://example.com/docs/page"
         content = "# Test Content"
-        await process_and_store_document(url, content, mock_db_connection, mock_logger)
+        # Pass cache_enabled=False to disable caching during test
+        await process_and_store_document(url, content, mock_db_connection, mock_logger, cache_enabled=False)
 
         # Verify mock calls
         mock_completion.assert_called()
@@ -73,7 +74,8 @@ async def test_process_and_store_document_special_chars(mock_db_connection, mock
         # Test URL with special characters
         url = "https://example.com/docs/page?with=params#fragment"
         content = "# Test Content"
-        await process_and_store_document(url, content, mock_db_connection, mock_logger)
+        # Pass cache_enabled=False to disable caching during test
+        await process_and_store_document(url, content, mock_db_connection, mock_logger, cache_enabled=False)
 
         # Verify mock calls
         mock_completion.assert_called()
