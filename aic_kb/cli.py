@@ -6,7 +6,7 @@ from typing import Optional
 import typer
 
 from aic_kb.pypi_doc_scraper.extract import get_embedding
-from aic_kb.pypi_doc_scraper.store import create_connection
+from aic_kb.pypi_doc_scraper.store import create_connection_pool
 
 app = typer.Typer()
 
@@ -69,7 +69,7 @@ def search(
         embedding = await get_embedding(text)
 
         # Connect to database
-        conn = await create_connection()
+        conn = await create_connection_pool()
         try:
             # Search for matches using the match_site_pages function
             results = await conn.fetch(

@@ -18,15 +18,23 @@ from aic_kb.pypi_doc_scraper.store import process_and_store_document
 
 
 @pytest.fixture
-async def mock_db_connection():
-    """Create a mock asyncpg connection for testing"""
+async def mock_db_connection_pool():
+    """Create a mock asyncpg connection pool for testing"""
     mock_conn = AsyncMock()
     mock_conn.prepare = AsyncMock()
     mock_conn.prepare.return_value.fetchval = AsyncMock(return_value=1)  # Return dummy ID
     mock_conn.fetchval = AsyncMock(return_value=True)  # Mock table existence check
     mock_conn.execute = AsyncMock()  # Mock execute method
     mock_conn.close = AsyncMock()  # Mock close method
-    return mock_conn
+
+    # Create mock pool
+    mock_pool = AsyncMock()
+    mock_pool.acquire = AsyncMock()
+    # Make acquire() return the mock connection as a context manager
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock()
+
+    return mock_pool
 
 
 @pytest.fixture
@@ -36,7 +44,7 @@ def mock_logger():
 
 
 @pytest.mark.asyncio
-async def test_get_package_documentation(mock_db_connection, mock_logger):
+async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -54,7 +62,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         patch("aic_kb.pypi_doc_scraper.extract.aembedding", return_value=mock_embedding_response) as mock_embedding,
         patch("requests.get") as mock_get,
         patch("aic_kb.pypi_doc_scraper.crawl.crawl_recursive") as mock_crawl,
-        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
     ):
         # Configure mock PyPI response
         mock_response = Mock()
@@ -65,7 +73,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         async def mock_crawl_with_content(*args, **kwargs):
             # Simulate processing content by calling process_and_store_document
             await process_and_store_document(
-                "https://docs.example.com", "# Test Content", mock_db_connection, mock_logger
+                "https://docs.example.com", "# Test Content", mock_db_connection_pool, mock_logger
             )
             return {"https://docs.example.com"}
 
@@ -92,7 +100,7 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
 
 
 @pytest.mark.asyncio
-async def test_crawl_recursive(mock_db_connection):
+async def test_crawl_recursive(mock_db_connection_pool):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -107,7 +115,7 @@ async def test_crawl_recursive(mock_db_connection):
     # Test unlimited depth
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
-        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
         patch(
             "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
         ) as mock_process_and_store_document,
@@ -146,7 +154,7 @@ async def test_crawl_recursive(mock_db_connection):
     # Test BFS strategy
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
-        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
         patch(
             "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
         ) as mock_process_and_store_document,
@@ -179,7 +187,7 @@ async def test_crawl_recursive(mock_db_connection):
     # Test DFS strategy
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
-        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
         patch(
             "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
         ) as mock_process_and_store_document,
@@ -211,7 +219,7 @@ async def test_crawl_recursive(mock_db_connection):
 
 
 @pytest.mark.asyncio
-async def test_robots_txt_handling(mock_db_connection):
+async def test_robots_txt_handling(mock_db_connection_pool):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -227,7 +235,7 @@ async def test_robots_txt_handling(mock_db_connection):
 
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
-        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
         patch(
             "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
         ) as mock_process_and_store_document,
@@ -264,7 +272,7 @@ async def test_robots_txt_handling(mock_db_connection):
 
 
 @pytest.mark.asyncio
-async def test_crawl_url_caching(mock_db_connection):
+async def test_crawl_url_caching(mock_db_connection_pool):
     """Test the caching functionality of crawl_url"""
     url = "https://example.com/test"
     cache_dir = ".crawl_cache"
@@ -276,7 +284,7 @@ async def test_crawl_url_caching(mock_db_connection):
 
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
-        patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
     ):
         # Setup mock crawler
         mock_instance = AsyncMock()
