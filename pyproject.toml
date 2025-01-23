@@ -36,6 +36,12 @@ filterwarnings = [
 #    "ignore::FutureWarning",         # Ignore all future warnings
 ]
 
+[tool.isort]
+force_to_top = true
+combine_as_imports = true
+lines_before_imports = 0
+lines_after_imports = 2
+
 [tool.black]
 line-length = 120
 

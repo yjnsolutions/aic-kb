@@ -7,7 +7,6 @@ from urllib.robotparser import RobotFileParser
 import pytest
 import requests
 from crawl4ai import CrawlerRunConfig
-from rich.progress import Progress
 
 from aic_kb.pypi_doc_scraper.crawl import (
     CrawlStrategy,
@@ -65,11 +64,9 @@ async def test_get_package_documentation(mock_db_connection, mock_logger):
         # Configure mock crawl_recursive to simulate content processing
         async def mock_crawl_with_content(*args, **kwargs):
             # Simulate processing content by calling process_and_store_document
-            with Progress() as progress:
-                task_id = progress.add_task("Testing", total=1)
-                await process_and_store_document(
-                    "https://docs.example.com", "# Test Content", progress, task_id, mock_db_connection, mock_logger
-                )
+            await process_and_store_document(
+                "https://docs.example.com", "# Test Content", mock_db_connection, mock_logger
+            )
             return {"https://docs.example.com"}
 
         mock_crawl.side_effect = mock_crawl_with_content
@@ -111,7 +108,9 @@ async def test_crawl_recursive(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
         patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
-        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
+        patch(
+            "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
+        ) as mock_process_and_store_document,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -148,7 +147,9 @@ async def test_crawl_recursive(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
         patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
-        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
+        patch(
+            "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
+        ) as mock_process_and_store_document,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -179,7 +180,9 @@ async def test_crawl_recursive(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
         patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
-        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
+        patch(
+            "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
+        ) as mock_process_and_store_document,
     ):
         mock_instance = Mock()
         # Add async context manager methods
@@ -225,7 +228,9 @@ async def test_robots_txt_handling(mock_db_connection):
     with (
         patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
         patch("aic_kb.pypi_doc_scraper.crawl.create_connection", return_value=mock_db_connection),
-        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]) as mock_process_and_store_document,
+        patch(
+            "aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]
+        ) as mock_process_and_store_document,
     ):
         # Create mock instance with async methods
         mock_instance = Mock()
