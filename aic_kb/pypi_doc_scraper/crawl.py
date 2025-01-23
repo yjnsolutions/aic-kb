@@ -5,7 +5,7 @@ import logging
 import os
 import signal
 from enum import Enum
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Set
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -26,6 +26,8 @@ from aic_kb.pypi_doc_scraper.store import (
     create_connection_pool,
     process_and_store_document,
 )
+
+from .types import CrawlUrlResult
 
 
 def setup_rich_logging(progress=None):
@@ -103,7 +105,7 @@ class CachedResult:
 
 async def crawl_url(
     crawler: AsyncWebCrawler, crawl_config: CrawlerRunConfig, url: str, cache_enabled: bool
-) -> Tuple[Any, str]:
+) -> CrawlUrlResult:
     final_url = None
     cache_dir = ".crawl_cache"
     cache_file = os.path.join(cache_dir, hashlib.sha256(url.encode()).hexdigest() + ".json")
@@ -116,7 +118,15 @@ async def crawl_url(
                 with open(cache_file) as f:
                     cached_data = json.load(f)
                     logger.info(f"Crawl cache HIT for {url}")
-                    return CachedResult(cached_data["result"]), cached_data["final_url"]
+                    return CrawlUrlResult(
+                        content=(
+                            cached_data["result"]["markdown_v2"]["raw_markdown"]
+                            if cached_data["result"]["markdown_v2"]
+                            else None
+                        ),
+                        final_url=cached_data["final_url"],
+                        links=cached_data["result"]["links"]["internal"] if cached_data["result"]["links"] else [],
+                    )
             except Exception as e:
                 logger.warning(f"Cache read error for {url}: {e}")
 
@@ -134,15 +144,17 @@ async def crawl_url(
     if final_url is None:
         final_url = url
 
+    content = result.markdown_v2.raw_markdown if result.markdown_v2 else None
+    links = result.links["internal"] if result.links and "internal" in result.links else []
+
     # Store in cache if enabled
     if cache_enabled:
         try:
-            # Create a simplified version of the result for caching
             cacheable_result = {
                 "success": result.success if hasattr(result, "success") else True,
                 "status_code": result.status_code if hasattr(result, "status_code") else 200,
-                "markdown_v2": {"raw_markdown": result.markdown_v2.raw_markdown if result.markdown_v2 else None},
-                "links": result.links if hasattr(result, "links") else None,
+                "markdown_v2": {"raw_markdown": content},
+                "links": {"internal": links} if links else None,
                 "error_message": result.error_message if hasattr(result, "error_message") else None,
             }
 
@@ -151,7 +163,7 @@ async def crawl_url(
         except Exception as e:
             logger.warning(f"Cache write error for {url}: {e}")
 
-    return result, final_url
+    return CrawlUrlResult(content=content, final_url=final_url, links=links)
 
 
 async def crawl_recursive(
@@ -248,53 +260,41 @@ async def crawl_recursive(
 
                     # Only use semaphore for the crawl operation
                     result = None
-                    actual_final_url = None
                     async with semaphore:
                         if shutdown_event.is_set():
                             break
 
                         logger.info(f"Crawling {current_url} at depth {current_depth}")
                         try:
-                            result, actual_final_url = await crawl_url(
-                                crawler, crawl_config, current_url, crawl_cache_enabled
-                            )
+                            result = await crawl_url(crawler, crawl_config, current_url, crawl_cache_enabled)
                         except Exception as e:
                             logger.error(f"Error crawling {current_url}: {str(e)}")
                             continue
 
                     # Process results outside of semaphore
                     if result:
-                        if actual_final_url != current_url:
-                            logger.info(f"Redirect detected: {current_url} -> {actual_final_url}")
-                        base_url = actual_final_url
-
-                        # Check for successful status code (2xx range)
-                        if not result.success or (result.status_code and not 200 <= result.status_code < 300):
-                            logger.warning(
-                                f"Skipping {current_url}: HTTP {result.status_code or 'unknown'} - "
-                                f"{result.error_message or 'Unknown error'}"
-                            )
-                            continue
+                        if result.final_url != current_url:
+                            logger.info(f"Redirect detected: {current_url} -> {result.final_url}")
+                        base_url = result.final_url
 
                         # Skip if final URL is outside base domain
                         if urlparse(base_url).netloc != base_domain:
                             logger.info(f"Skipping {base_url}: outside base domain after redirect")
                             continue
 
-                        # Only process and store successful responses
-                        if result.markdown_v2 and result.markdown_v2.raw_markdown:
+                        # Only process and store if we have content
+                        if result.content:
                             # Process document without semaphore
                             store_task = asyncio.create_task(
-                                process_and_store_document(
-                                    base_url, result.markdown_v2.raw_markdown, connection_pool, logger
-                                )
+                                process_and_store_document(base_url, result.content, connection_pool, logger)
                             )
 
                             logger.info(f"Successfully crawled: {base_url} (redirect from {current_url})")
                             crawled_urls.add(base_url)
 
                             # Process internal links only for successfully stored pages
-                            if result.links and "internal" in result.links:
+                            # The rest of the code remains the same...
+                            if result.links:
                                 new_urls = 0
 
                                 async def process_link(link):
@@ -304,7 +304,7 @@ async def crawl_recursive(
                                         return
 
                                     # Remove anchor fragments and normalize URL
-                                    normalized_url = href.split("#")[0].replace(current_url, actual_final_url)
+                                    normalized_url = href.split("#")[0].replace(current_url, result.final_url)
                                     if normalized_url not in crawled_urls and normalized_url not in [
                                         url for url, _ in to_crawl
                                     ]:
@@ -313,8 +313,8 @@ async def crawl_recursive(
 
                                 # Process links in parallel batches of 50
                                 batch_size = 50
-                                for i in range(0, len(result.links["internal"]), batch_size):
-                                    batch = result.links["internal"][i : i + batch_size]
+                                for i in range(0, len(result.links), batch_size):
+                                    batch = result.links[i : i + batch_size]
                                     await asyncio.gather(*[process_link(link) for link in batch])
                                 if new_urls > 0:
                                     progress.update(task_id, total=len(crawled_urls) + len(to_crawl))
