@@ -308,13 +308,13 @@ async def test_crawl_url_caching(mock_db_connection_pool):
 
         # First request - should create cache
         config = CrawlerRunConfig()
-        result1, url1 = await crawl_url(mock_instance, config, url, cache_enabled=True)
+        await crawl_url(mock_instance, config, url, cache_enabled=True)
 
         # Verify cache was created
         assert os.path.exists(cache_file)
 
         # Second request - should use cache
-        result2, url2 = await crawl_url(mock_instance, config, url, cache_enabled=True)
+        await crawl_url(mock_instance, config, url, cache_enabled=True)
 
         # Verify crawler was only called once
         assert mock_instance.arun.call_count == 1
