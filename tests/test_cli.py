@@ -46,8 +46,6 @@ def test_get_package_documentation():
                 "--strategy",
                 "dfs",
                 "--ignore-robots",
-                "--embedding-model",
-                "custom-model",
                 "--limit",
                 "10",
                 "--disable-crawl-cache",
