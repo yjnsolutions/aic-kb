@@ -41,6 +41,7 @@ cover/
 # Environment variables
 .env
 .env.*
+!.env.template
 
 # System files
 .DS_Store

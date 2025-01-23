@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import urllib.parse
 from asyncio import Semaphore
@@ -26,13 +27,13 @@ async def ensure_db_initialized(connection: asyncpg.Connection):
 
 async def create_connection_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(
-        user="postgres",  # Replace with actual credentials
-        password="mysecretpassword",  # Replace with actual credentials
-        database="postgres",  # Replace with actual database name
-        host="localhost",  # Replace with actual host
-        port=5432,
-        min_size=4,
-        max_size=8,
+        user=os.getenv("POSTGRES_USER", "postgres"),
+        password=os.getenv("POSTGRES_PASSWORD", "mysecretpassword"),
+        database=os.getenv("POSTGRES_DB", "postgres"),
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=int(os.getenv("POSTGRES_PORT", "5432")),
+        min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "4")),
+        max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "8")),
     )
 
     async with pool.acquire() as connection:

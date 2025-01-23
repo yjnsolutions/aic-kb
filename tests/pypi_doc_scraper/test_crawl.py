@@ -262,12 +262,16 @@ async def test_robots_txt_handling(mock_db_connection_pool):
 
         # Test blocked URL
         blocked_url = "https://example.com/blocked"
-        urls = await crawl_recursive(blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, crawl_cache_enabled=False)
+        urls = await crawl_recursive(
+            blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, crawl_cache_enabled=False
+        )
         assert len(urls) == 0  # Should not crawl blocked URL
 
         # Test allowed URL
         allowed_url = "https://example.com/docs"
-        urls = await crawl_recursive(allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, crawl_cache_enabled=False)
+        urls = await crawl_recursive(
+            allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, crawl_cache_enabled=False
+        )
         assert len(urls) == 1  # Should crawl allowed URL
         assert mock_process_and_store_document.call_count > 0  # Should have called completion for content processing
 
