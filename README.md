@@ -47,3 +47,12 @@ To connect to DB:
 ```fish
 docker exec -ti aic-kb psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
+
+
+## Development
+
+Run tests with:
+
+```fish
+
+```

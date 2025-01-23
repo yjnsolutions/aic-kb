@@ -26,3 +26,16 @@ repos:
     rev: v1.14.1
     hooks:
     -   id: mypy
+-   repo: local
+    hooks:
+    -   id: pytest-cov
+        name: pytest coverage
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        args: [
+            "--cov=aic_kb",
+            "--cov-report=term-missing",
+            "--cov-fail-under=70",
+        ]
