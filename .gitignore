@@ -48,3 +48,5 @@ Thumbs.db
 .aider*
 data/*
 .crawl_cache/*
+.title_and_summary_cache/
+.embedding_cache/

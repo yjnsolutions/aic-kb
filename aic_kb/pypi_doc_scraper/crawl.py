@@ -272,7 +272,13 @@ async def crawl_recursive(
                         if result.content:
                             # Process document without semaphore
                             store_task = asyncio.create_task(
-                                process_and_store_document(base_url, result.content, connection_pool, logger)
+                                process_and_store_document(
+                                    base_url,
+                                    result.content,
+                                    connection_pool,
+                                    logger,
+                                    cache_enabled=crawl_cache_enabled,
+                                )
                             )
 
                             logger.info(f"Successfully crawled: {base_url} (redirect from {current_url})")

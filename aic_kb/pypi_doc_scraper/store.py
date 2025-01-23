@@ -62,17 +62,10 @@ async def process_and_store_document(
     content: str,
     connection_pool: asyncpg.Pool,
     logger: logging.Logger,
-    max_concurrent: int = 5,  # Default to 5 concurrent chunks
+    max_concurrent: int = 5,
+    cache_enabled: bool = True,
 ) -> List[Optional[ProcessedChunk]]:
-    """
-    Store the scraped content in markdown files and process chunks for embeddings.
-    Args:
-        url: The URL of the scraped page
-        content: The markdown content to store
-        connection_pool: asyncpg Connection pool
-        logger: logger configured to log to Rich console
-        max_concurrent: Maximum number of concurrent chunk processing tasks
-    """
+    """Process and store document with caching support"""
     # Create semaphore for controlling concurrency
     sem = Semaphore(max_concurrent)
 
@@ -98,9 +91,8 @@ async def process_and_store_document(
 
     async def process_and_store_chunk(chunk: str, i: int) -> Optional[ProcessedChunk]:
         try:
-            # Use semaphore to limit concurrent processing
             async with sem:
-                processed_chunk = await process_chunk(chunk, i, url)
+                processed_chunk = await process_chunk(chunk, i, url, cache_enabled)
 
                 # Insert into database
                 metadata = {

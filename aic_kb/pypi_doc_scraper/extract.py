@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -49,8 +50,24 @@ class CostTracker:
 cost_tracker = CostTracker()
 
 
-async def get_title_and_summary(chunk: str, url: str) -> Dict[str, str]:
+async def get_title_and_summary(chunk: str, url: str, cache_enabled: bool = True) -> Dict[str, str]:
     """Extract title and summary using GPT-4."""
+    cache_dir = ".title_and_summary_cache"
+    cache_file = os.path.join(cache_dir, hashlib.sha256(f"{url}:{chunk}".encode()).hexdigest() + ".json")
+
+    # Check cache if enabled
+    if cache_enabled:
+        os.makedirs(cache_dir, exist_ok=True)
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file) as f:
+                    cached_result = json.load(f)
+                    logger.info(f"Title/Summary cache HIT for {url}")
+                    return cached_result
+            except Exception as e:
+                logger.warning(f"Cache read error for title/summary {url}: {e}")
+
+    logger.info(f"Title/Summary cache MISS for {url}")
     system_prompt = """You are an AI that extracts titles and summaries from documentation chunks.
     Return a JSON object with 'title' and 'summary' keys.
     For the title: If this seems like the start of a document, extract its title. If it's a middle chunk, derive a descriptive title.
@@ -78,14 +95,40 @@ async def get_title_and_summary(chunk: str, url: str) -> Dict[str, str]:
             f"Completion: {response.usage.completion_tokens}), "
             f"Cost: ${cost:.6f}"
         )
-        return json.loads(response.choices[0].message.content)
+        result = json.loads(response.choices[0].message.content)
+
+        # Store in cache if enabled
+        if cache_enabled:
+            try:
+                with open(cache_file, "w") as f:
+                    json.dump(result, f)
+            except Exception as e:
+                logger.warning(f"Cache write error for title/summary {url}: {e}")
+
+        return result
     except Exception as e:
         logger.warning(f"Error getting title and summary: {e}")
         return {"title": "Error processing title", "summary": "Error processing summary"}
 
 
-async def get_embedding(text: str) -> List[float]:
+async def get_embedding(text: str, cache_enabled: bool = True) -> List[float]:
     """Get embedding vector using litellm."""
+    cache_dir = ".embedding_cache"
+    cache_file = os.path.join(cache_dir, hashlib.sha256(text.encode()).hexdigest() + ".json")
+
+    # Check cache if enabled
+    if cache_enabled:
+        os.makedirs(cache_dir, exist_ok=True)
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file) as f:
+                    cached_embedding = json.load(f)
+                    logger.info("Embedding cache HIT")
+                    return cached_embedding
+            except Exception as e:
+                logger.warning(f"Cache read error for embedding: {e}")
+
+    logger.info("Embedding cache MISS")
     try:
         response = await aembedding(model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"), input=text)
         # Track cost and tokens
@@ -95,19 +138,29 @@ async def get_embedding(text: str) -> List[float]:
 
         # Log individual call stats
         logger.info(f"Embedding Generation - Tokens: {total_tokens}, " f"Cost: ${cost:.6f}")
-        return response.data[0]["embedding"]
+        embedding = response.data[0]["embedding"]
+
+        # Store in cache if enabled
+        if cache_enabled:
+            try:
+                with open(cache_file, "w") as f:
+                    json.dump(embedding, f)
+            except Exception as e:
+                logger.warning(f"Cache write error for embedding: {e}")
+
+        return embedding
     except Exception as e:
         logger.warning(f"Error getting embedding: {e}")
         return [0] * 1536  # Return zero vector on error
 
 
-async def process_chunk(chunk: str, chunk_number: int, url: str) -> ProcessedChunk:
+async def process_chunk(chunk: str, chunk_number: int, url: str, cache_enabled: bool = True) -> ProcessedChunk:
     """Process a single chunk of text."""
     # Get title and summary
-    extracted = await get_title_and_summary(chunk, url)
+    extracted = await get_title_and_summary(chunk, url, cache_enabled)
 
     # Get embedding
-    embedding = await get_embedding(chunk)
+    embedding = await get_embedding(chunk, cache_enabled)
 
     # Create metadata
     metadata = {
