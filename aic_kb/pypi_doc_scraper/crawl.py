@@ -22,7 +22,10 @@ from rich.progress import (
     TextColumn,
 )
 
-from aic_kb.pypi_doc_scraper.store import create_connection, process_and_store_document
+from aic_kb.pypi_doc_scraper.store import (
+    create_connection_pool,
+    process_and_store_document,
+)
 
 
 def setup_rich_logging(progress=None):
@@ -174,8 +177,8 @@ async def crawl_recursive(
     Returns:
         Set of successfully crawled URLs
     """
-    # Create database connection
-    connection = await create_connection()
+    # Create database connection pool
+    connection_pool = await create_connection_pool()
 
     try:
         logger.info(
@@ -283,7 +286,7 @@ async def crawl_recursive(
                             # Process document without semaphore
                             store_task = asyncio.create_task(
                                 process_and_store_document(
-                                    base_url, result.markdown_v2.raw_markdown, connection, logger
+                                    base_url, result.markdown_v2.raw_markdown, connection_pool, logger
                                 )
                             )
 
@@ -341,7 +344,7 @@ async def crawl_recursive(
 
     finally:
         # Close the connection when done
-        await connection.close()
+        await connection_pool.close()
 
 
 async def _get_package_documentation(

@@ -24,39 +24,43 @@ async def ensure_db_initialized(connection: asyncpg.Connection):
     await connection.execute(init_sql)
 
 
-async def create_connection():
-    connection = await asyncpg.connect(
+async def create_connection_pool() -> asyncpg.Pool:
+    pool = await asyncpg.create_pool(
         user="postgres",  # Replace with actual credentials
         password="mysecretpassword",  # Replace with actual credentials
         database="postgres",  # Replace with actual database name
         host="localhost",  # Replace with actual host
+        port=5432,
+        min_size=4,
+        max_size=8,
     )
 
-    # Check if table exists before initializing
-    table_exists = await connection.fetchval(
-        """
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name = 'site_pages'
-        );
-        """
-    )
+    async with pool.acquire() as connection:
+        # Check if table exists before initializing
+        table_exists = await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'site_pages'
+            );
+            """
+        )
 
-    if not table_exists:
-        try:
-            await ensure_db_initialized(connection)
-        except Exception as e:
-            logging.error(f"Error initializing database: {e}")
-            raise
+        if not table_exists:
+            try:
+                await ensure_db_initialized(connection)
+            except Exception as e:
+                logging.error(f"Error initializing database: {e}")
+                raise
 
-    return connection
+    return pool
 
 
 async def process_and_store_document(
     url: str,
     content: str,
-    connection: asyncpg.Connection,
+    connection_pool: asyncpg.Pool,
     logger: logging.Logger,
     max_concurrent: int = 5,  # Default to 5 concurrent chunks
 ) -> List[Optional[ProcessedChunk]]:
@@ -65,7 +69,7 @@ async def process_and_store_document(
     Args:
         url: The URL of the scraped page
         content: The markdown content to store
-        connection: asyncpg Connection instance
+        connection_pool: asyncpg Connection pool
         logger: logger configured to log to Rich console
         max_concurrent: Maximum number of concurrent chunk processing tasks
     """
@@ -92,22 +96,6 @@ async def process_and_store_document(
     # Process chunks
     chunks = chunk_text(content)
 
-    insert_stmt = await connection.prepare(
-        """
-        INSERT INTO site_pages 
-        (url, chunk_number, title, summary, content, metadata, embedding)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (url, chunk_number) 
-        DO UPDATE SET
-            title = EXCLUDED.title,
-            summary = EXCLUDED.summary,
-            content = EXCLUDED.content,
-            metadata = EXCLUDED.metadata,
-            embedding = EXCLUDED.embedding
-        RETURNING id
-    """
-    )
-
     async def process_and_store_chunk(chunk: str, i: int) -> Optional[ProcessedChunk]:
         try:
             # Use semaphore to limit concurrent processing
@@ -123,15 +111,32 @@ async def process_and_store_document(
                 # Serialize metadata to JSON string
                 metadata_json = json.dumps(metadata)
 
-                await insert_stmt.fetchval(
-                    url,
-                    processed_chunk.chunk_number,
-                    processed_chunk.title,
-                    processed_chunk.summary,
-                    processed_chunk.content,
-                    metadata_json,
-                    json.dumps(processed_chunk.embedding, separators=(",", ":")),
-                )
+                async with connection_pool.acquire() as connection:
+                    insert_stmt = await connection.prepare(
+                        """
+                        INSERT INTO site_pages 
+                        (url, chunk_number, title, summary, content, metadata, embedding)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (url, chunk_number) 
+                        DO UPDATE SET
+                            title = EXCLUDED.title,
+                            summary = EXCLUDED.summary,
+                            content = EXCLUDED.content,
+                            metadata = EXCLUDED.metadata,
+                            embedding = EXCLUDED.embedding
+                        RETURNING id
+                    """
+                    )
+
+                    await insert_stmt.fetchval(
+                        url,
+                        processed_chunk.chunk_number,
+                        processed_chunk.title,
+                        processed_chunk.summary,
+                        processed_chunk.content,
+                        metadata_json,
+                        json.dumps(processed_chunk.embedding, separators=(",", ":")),
+                    )
 
                 return processed_chunk
         except Exception as e:
