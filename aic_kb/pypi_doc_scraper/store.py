@@ -42,7 +42,7 @@ async def create_connection_pool() -> asyncpg.Pool:
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
                 WHERE table_schema = 'public' 
-                AND table_name = 'site_pages'
+                AND table_name = 'openai_site_pages'
             );
             """
         )
@@ -114,16 +114,17 @@ async def process_and_store_document(
                 async with connection_pool.acquire() as connection:
                     insert_stmt = await connection.prepare(
                         """
-                        INSERT INTO site_pages 
-                        (url, chunk_number, title, summary, content, metadata, embedding)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        INSERT INTO openai_site_pages 
+                        (url, chunk_number, title, summary, content, metadata, embedding, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, timezone('utc'::text, now()))
                         ON CONFLICT (url, chunk_number) 
                         DO UPDATE SET
                             title = EXCLUDED.title,
                             summary = EXCLUDED.summary,
                             content = EXCLUDED.content,
                             metadata = EXCLUDED.metadata,
-                            embedding = EXCLUDED.embedding
+                            embedding = EXCLUDED.embedding,
+                            updated_at = timezone('utc'::text, now())
                         RETURNING id
                     """
                     )
