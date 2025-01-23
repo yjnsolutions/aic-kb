@@ -90,7 +90,7 @@ async def get_title_and_summary(chunk: str, url: str) -> Dict[str, str]:
         )
         return json.loads(response.choices[0].message.content)
     except Exception as e:
-        print(f"Error getting title and summary: {e}")
+        logger.warning(f"Error getting title and summary: {e}")
         return {"title": "Error processing title", "summary": "Error processing summary"}
 
 
@@ -107,7 +107,7 @@ async def get_embedding(text: str) -> List[float]:
         logger.info(f"Embedding Generation - Tokens: {total_tokens}, " f"Cost: ${cost:.6f}")
         return response.data[0]["embedding"]
     except Exception as e:
-        print(f"Error getting embedding: {e}")
+        logger.warning(f"Error getting embedding: {e}")
         return [0] * 1536  # Return zero vector on error
 
 

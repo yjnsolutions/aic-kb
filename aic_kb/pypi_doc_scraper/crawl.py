@@ -10,7 +10,13 @@ from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
+from crawl4ai import (
+    AsyncWebCrawler,
+    BrowserConfig,
+    CacheMode,
+    CrawlerRunConfig,
+    CrawlResult,
+)
 from playwright.async_api import BrowserContext, Page
 from rich.console import Console
 from rich.logging import RichHandler
@@ -87,20 +93,7 @@ class URLTracker:
         self.final_urls: Dict[str, str] = {}
 
     def set_final_url(self, original_url: str, final_url: str):
-        self.final_urls[original_url] = final_url
-
-
-class CachedResult:
-    def __init__(self, data):
-        self.success = data["success"]
-        self.status_code = data["status_code"]
-        self.markdown_v2 = (
-            type("Markdown", (), {"raw_markdown": data["markdown_v2"]["raw_markdown"]})()
-            if data["markdown_v2"]
-            else None
-        )
-        self.links = data["links"]
-        self.error_message = data["error_message"]
+        pass
 
 
 async def crawl_url(
@@ -116,16 +109,14 @@ async def crawl_url(
         if os.path.exists(cache_file):
             try:
                 with open(cache_file) as f:
-                    cached_data = json.load(f)
+                    cached_json = json.loads(f.read())
+                    final_url = cached_json.pop("final_url")  # Get final_url from cached metadata
+                    cached_result = CrawlResult.model_validate(cached_json)
                     logger.info(f"Crawl cache HIT for {url}")
                     return CrawlUrlResult(
-                        content=(
-                            cached_data["result"]["markdown_v2"]["raw_markdown"]
-                            if cached_data["result"]["markdown_v2"]
-                            else None
-                        ),
-                        final_url=cached_data["final_url"],
-                        links=cached_data["result"]["links"]["internal"] if cached_data["result"]["links"] else [],
+                        content=cached_result.markdown_v2.raw_markdown if cached_result.markdown_v2 else None,
+                        final_url=final_url,
+                        links=cached_result.links["internal"] if cached_result.links else [],
                     )
             except Exception as e:
                 logger.warning(f"Cache read error for {url}: {e}")
@@ -139,31 +130,26 @@ async def crawl_url(
 
     crawler.crawler_strategy.set_hook("before_return_html", capture_final_url)
 
-    result = await crawler.arun(url=url, config=crawl_config, session_id="session1")
+    result: CrawlResult = await crawler.arun(url=url, config=crawl_config, session_id="session1")
 
     if final_url is None:
         final_url = url
 
-    content = result.markdown_v2.raw_markdown if result.markdown_v2 else None
-    links = result.links["internal"] if result.links and "internal" in result.links else []
-
     # Store in cache if enabled
     if cache_enabled:
         try:
-            cacheable_result = {
-                "success": result.success if hasattr(result, "success") else True,
-                "status_code": result.status_code if hasattr(result, "status_code") else 200,
-                "markdown_v2": {"raw_markdown": content},
-                "links": {"internal": links} if links else None,
-                "error_message": result.error_message if hasattr(result, "error_message") else None,
-            }
-
+            # Create cache entry with both the CrawlResult and final_url
+            cache_data = {"final_url": final_url, **result.model_dump(mode="json")}
             with open(cache_file, "w") as f:
-                json.dump({"result": cacheable_result, "final_url": final_url}, f)
+                json.dump(cache_data, f)
         except Exception as e:
             logger.warning(f"Cache write error for {url}: {e}")
 
-    return CrawlUrlResult(content=content, final_url=final_url, links=links)
+    return CrawlUrlResult(
+        content=result.markdown_v2.raw_markdown if result.markdown_v2 else None,
+        final_url=final_url,
+        links=result.links["internal"] if result.links and "internal" in result.links else [],
+    )
 
 
 async def crawl_recursive(

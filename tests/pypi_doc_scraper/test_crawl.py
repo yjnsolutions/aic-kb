@@ -7,6 +7,7 @@ from urllib.robotparser import RobotFileParser
 import pytest
 import requests
 from crawl4ai import CrawlerRunConfig
+from pydantic import BaseModel
 
 from aic_kb.pypi_doc_scraper.crawl import (
     CrawlStrategy,
@@ -292,14 +293,32 @@ async def test_crawl_url_caching(mock_db_connection_pool):
         mock_instance.__aexit__ = AsyncMock()
         mock_instance.arun = AsyncMock()
 
-        # Create a mock response as a simple object with attributes
-        class MockResponse:
-            def __init__(self):
-                self.success = True
-                self.status_code = 200
-                self.markdown_v2 = type("", (), {"raw_markdown": "test content"})()
-                self.links = {"internal": []}
-                self.error_message = None
+        # Create a proper mock response class that inherits from BaseModel
+        class MockMarkdownV2(BaseModel):
+            raw_markdown: str = "test content"
+            markdown_with_citations: str = "test content with citations"
+            references_markdown: str = "test references"
+
+        class MockResponse(BaseModel):
+            success: bool = True
+            status_code: int = 200
+            markdown_v2: MockMarkdownV2 = MockMarkdownV2()
+            links: dict = {"internal": []}
+            error_message: None = None
+            url: str = "https://example.com/test"  # Add required url field
+            html: str = "<html>test content</html>"  # Add required html field
+
+        def model_dump(self, mode="json"):
+            """Implement model_dump method"""
+            return {
+                "success": self.success,
+                "status_code": self.status_code,
+                "markdown_v2": self.markdown_v2.model_dump(mode=mode),
+                "links": self.links,
+                "error_message": self.error_message,
+                "url": self.url,
+                "html": self.html
+            }
 
         mock_response = MockResponse()
         mock_instance.arun.return_value = mock_response
@@ -307,6 +326,7 @@ async def test_crawl_url_caching(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         # First request - should create cache
+        os.makedirs(cache_dir, exist_ok=True)
         config = CrawlerRunConfig()
         await crawl_url(mock_instance, config, url, cache_enabled=True)
 
