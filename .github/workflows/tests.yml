@@ -24,4 +24,4 @@ jobs:
       run: uv sync
 
     - name: Run tests
-      run: coverage run -m pytest -v tests/
+      run: uv run coverage run -m pytest -v tests/
