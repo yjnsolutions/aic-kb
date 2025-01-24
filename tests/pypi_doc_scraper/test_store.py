@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, Mock
 
 import pytest
 
@@ -13,17 +13,8 @@ def mock_logger():
     return logging.getLogger("test_logger")
 
 
-@pytest.fixture
-async def mock_db_connection():
-    """Create a mock asyncpg connection for testing"""
-    mock_conn = AsyncMock()
-    mock_conn.prepare = AsyncMock()
-    mock_conn.prepare.return_value.fetchval = AsyncMock(return_value=1)  # Return dummy ID
-    return mock_conn
-
-
 @pytest.mark.asyncio
-async def test_process_and_store_document(mock_db_connection, mock_logger, tmp_path):
+async def test_process_and_store_document(mock_db_connection_pool, mock_logger, tmp_path):
     # Mock litellm responses
     mock_completion_response = AsyncMock()
     mock_completion_response.choices = [
@@ -44,7 +35,7 @@ async def test_process_and_store_document(mock_db_connection, mock_logger, tmp_p
         url = "https://example.com/docs/page"
         content = "# Test Content"
         # Pass cache_enabled=False to disable caching during test
-        await process_and_store_document(url, content, mock_db_connection, mock_logger, cache_enabled=False)
+        await process_and_store_document(url, content, mock_db_connection_pool, mock_logger, cache_enabled=False)
 
         # Verify mock calls
         mock_completion.assert_called()
@@ -57,14 +48,14 @@ async def test_process_and_store_document(mock_db_connection, mock_logger, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_process_and_store_document_special_chars(mock_db_connection, mock_logger):
+async def test_process_and_store_document_special_chars(mock_db_connection_pool, mock_logger):
     # Mock litellm responses
-    mock_completion_response = AsyncMock()
+    mock_completion_response = Mock()
     mock_completion_response.choices = [
         AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
     ]
 
-    mock_embedding_response = AsyncMock()
+    mock_embedding_response = Mock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
 
     with (
@@ -75,7 +66,7 @@ async def test_process_and_store_document_special_chars(mock_db_connection, mock
         url = "https://example.com/docs/page?with=params#fragment"
         content = "# Test Content"
         # Pass cache_enabled=False to disable caching during test
-        await process_and_store_document(url, content, mock_db_connection, mock_logger, cache_enabled=False)
+        await process_and_store_document(url, content, mock_db_connection_pool, mock_logger, cache_enabled=False)
 
         # Verify mock calls
         mock_completion.assert_called()

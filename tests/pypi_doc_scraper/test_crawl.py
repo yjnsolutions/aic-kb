@@ -27,12 +27,12 @@ def mock_logger():
 @pytest.mark.asyncio
 async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
     # Mock litellm responses
-    mock_completion_response = AsyncMock()
+    mock_completion_response = Mock()
     mock_completion_response.choices = [
         AsyncMock(message=AsyncMock(content='{"title": "Test Title", "summary": "Test Summary"}'))
     ]
 
-    mock_embedding_response = AsyncMock()
+    mock_embedding_response = Mock()
     mock_embedding_response.data = [[0.1] * 1536]  # Mock embedding vector
 
     # Mock the PyPI response
