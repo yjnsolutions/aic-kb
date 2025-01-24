@@ -23,20 +23,8 @@ jobs:
     - name: Install dependencies with uv
       run: uv sync
 
-    - name: Run black
-      run: uv run black --check .
-
-    - name: Run isort
-      run: uv run isort --check .
-
-    - name: Run ruff
-      run: uv run ruff check .
-
-    - name: Run pyupgrade
-      run: uv run pyupgrade --py312-plus **/*.py
-
-    - name: Run mypy
-      run: uv run mypy .
+    - name: Run pre-commit checks
+      run: uv run pre-commit run --all-files
 
     - name: Run tests
       run: uv run coverage run -m pytest -v tests/
