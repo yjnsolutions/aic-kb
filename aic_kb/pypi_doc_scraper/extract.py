@@ -196,39 +196,49 @@ def chunk_text(text: str, chunk_size: int = 5000) -> List[str]:
 
     while start < text_length:
         # Calculate end position
-        end = start + chunk_size
+        end = min(start + chunk_size, text_length)
 
-        # If we're at the end of the text, just take what's left
-        if end >= text_length:
-            chunks.append(text[start:].strip())
-            break
-
-        # Try to find a code block boundary first (```)
+        # Extract the initial chunk
         chunk = text[start:end]
-        code_block = chunk.rfind("```")
-        if code_block != -1 and code_block > chunk_size * 0.3:
-            end = start + code_block
 
-        # If no code block, try to break at a paragraph
-        elif "\n\n" in chunk:
-            # Find the last paragraph break
-            last_break = chunk.rfind("\n\n")
-            if last_break > chunk_size * 0.3:  # Only break if we're past 30% of chunk_size
-                end = start + last_break
+        # Count the number of code block markers in the chunk
+        code_block_markers = chunk.count("```")
 
-        # If no paragraph break, try to break at a sentence
-        elif ". " in chunk:
-            # Find the last sentence break
-            last_period = chunk.rfind(". ")
-            if last_period > chunk_size * 0.3:  # Only break if we're past 30% of chunk_size
-                end = start + last_period + 1
+        # If there's an unclosed code block (odd count of markers)
+        if code_block_markers % 2 != 0:
+            # Find the position of the next closing code block marker after the current end
+            next_code_block_end = text.find("```", end)
+
+            if next_code_block_end != -1:
+                # Adjust the end position to include the closing code block marker
+                end = next_code_block_end + 3  # +3 to include the "```"
+                chunk = text[start:end]
+            else:
+                # If no closing marker is found, include the rest of the text
+                end = text_length
+                chunk = text[start:end]
+        else:
+            # Try to find a paragraph break
+            if "\n\n" in chunk:
+                # Find the last paragraph break
+                last_break = chunk.rfind("\n\n")
+                if last_break > chunk_size * 0.3:
+                    end = start + last_break
+                    chunk = text[start:end]
+            # If no paragraph break, try to break at a sentence
+            elif ". " in chunk:
+                # Find the last sentence break
+                last_period = chunk.rfind(". ")
+                if last_period > chunk_size * 0.3:
+                    end = start + last_period + 1
+                    chunk = text[start:end]
 
         # Extract chunk and clean it up
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)
 
-        # Move start position for next chunk
-        start = max(start + 1, end)
+        # Move start position to the end of the current chunk
+        start = end
 
     return chunks

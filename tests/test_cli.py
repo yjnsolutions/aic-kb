@@ -58,16 +58,18 @@ def test_get_package_documentation():
 
 def test_search_command_with_results(mock_db_connection_pool):
     async_mock_get_embedding = AsyncMock(return_value=[0.1] * 1536)
-    mock_db_connection_pool.connection.fetch = AsyncMock(return_value=[
-        {
-            "title": "Test Title",
-            "url": "http://test.com",
-            "summary": "Test Summary",
-            "similarity": 0.95,
-            "chunk_number": 1,
-            "content": "Test Content",
-        }
-    ])
+    mock_db_connection_pool.connection.fetch = AsyncMock(
+        return_value=[
+            {
+                "title": "Test Title",
+                "url": "http://test.com",
+                "summary": "Test Summary",
+                "similarity": 0.95,
+                "chunk_number": 1,
+                "content": "Test Content",
+            }
+        ]
+    )
 
     with (
         patch("aic_kb.search.search.get_embedding", async_mock_get_embedding),
