@@ -159,7 +159,7 @@ async def crawl_recursive(
     robot_parser: Optional[RobotFileParser] = None,
     max_concurrent: int = 15,
     limit: Optional[int] = None,
-    crawl_cache_enabled: bool = True,
+    caching_enabled: bool = True,
 ) -> Set[str]:
     """
     Recursively crawl a website starting from a URL.
@@ -252,7 +252,7 @@ async def crawl_recursive(
 
                         logger.info(f"Crawling {current_url} at depth {current_depth}")
                         try:
-                            result = await crawl_url(crawler, crawl_config, current_url, crawl_cache_enabled)
+                            result = await crawl_url(crawler, crawl_config, current_url, caching_enabled)
                         except Exception as e:
                             logger.error(f"Error crawling {current_url}: {str(e)}")
                             continue
@@ -277,7 +277,7 @@ async def crawl_recursive(
                                     result.content,
                                     connection_pool,
                                     logger,
-                                    cache_enabled=crawl_cache_enabled,
+                                    cache_enabled=caching_enabled,
                                 )
                             )
 
@@ -346,7 +346,7 @@ async def _get_package_documentation(
     strategy: str = "bfs",
     ignore_robots: bool = False,
     limit: Optional[int] = None,
-    crawl_cache_enabled: bool = True,
+    caching_enabled: bool = True,
 ) -> None:
     """
     setup_rich_logging()
@@ -403,7 +403,7 @@ async def _get_package_documentation(
     logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
     try:
         await crawl_recursive(
-            documentation_url, depth, crawl_strat, robot_parser, limit=limit, crawl_cache_enabled=crawl_cache_enabled
+            documentation_url, depth, crawl_strat, robot_parser, limit=limit, caching_enabled=caching_enabled
         )
     except Exception as e:
         logger.error(f"Error during documentation crawl: {str(e)}")

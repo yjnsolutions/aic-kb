@@ -28,7 +28,7 @@ def get_package_documentation(
     strategy: str = typer.Option("bfs", help="Crawling strategy: 'bfs' or 'dfs'"),
     ignore_robots: bool = typer.Option(False, help="Ignore robots.txt rules"),
     limit: Optional[int] = typer.Option(None, help="Maximum number of pages to crawl (None for unlimited)"),
-    disable_crawl_cache: bool = typer.Option(False, help="Disable crawl caching"),
+    disable_caching: bool = typer.Option(False, help="Disable caching (for crawling, completion and embeddings)"),
 ):
     """
     Scrape documentation for a Python package and save as markdown files.
@@ -41,7 +41,7 @@ def get_package_documentation(
 
     asyncio.run(
         _get_package_documentation(
-            package_name, version, depth, strategy, ignore_robots, limit, crawl_cache_enabled=not disable_crawl_cache
+            package_name, version, depth, strategy, ignore_robots, limit, caching_enabled=not disable_caching
         )
     )
 
