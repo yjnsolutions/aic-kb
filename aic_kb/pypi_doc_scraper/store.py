@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import asyncpg
+from asyncpg import create_pool
 
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
@@ -26,7 +27,7 @@ async def ensure_db_initialized(connection: asyncpg.Connection):
 
 
 async def create_connection_pool() -> asyncpg.Pool:
-    pool = await asyncpg.create_pool(
+    pool = await create_pool(
         user=os.environ["POSTGRES_USER"],
         password=os.environ["POSTGRES_PASSWORD"],
         database=os.environ["POSTGRES_DB"],

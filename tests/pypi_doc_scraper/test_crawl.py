@@ -326,3 +326,75 @@ async def test_crawl_url_caching(mock_db_connection_pool):
         # Cleanup
         if os.path.exists(cache_file):
             os.remove(cache_file)
+
+
+@pytest.mark.asyncio
+async def test_link_processing(mock_db_connection_pool):
+    """Test the link processing functionality in crawl_recursive"""
+    start_url = "https://example.com/docs"
+    
+    # Create mock links that include both internal and cross-domain links
+    mock_links = {
+        "internal": [
+            {"href": "https://example.com/docs/page1"},
+            {"href": "https://example.com/docs/page2"},
+            {"href": "https://example.com/docs/page2#section"},  # With fragment
+            {"href": "https://different-domain.com/page"},  # External domain
+            {"href": ""},  # Empty href
+            {"href": "https://example.com/docs"}  # Same as start_url
+        ]
+    }
+
+    with (
+        patch("aic_kb.pypi_doc_scraper.crawl.AsyncWebCrawler") as mock_crawler,
+        patch("aic_kb.pypi_doc_scraper.crawl.create_connection_pool", return_value=mock_db_connection_pool),
+        patch("aic_kb.pypi_doc_scraper.crawl.process_and_store_document", return_value=["chunk1"]),
+    ):
+        # Setup mock crawler
+        mock_instance = Mock()
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=None)
+        mock_instance.start = AsyncMock()
+        mock_instance.arun = AsyncMock()
+        mock_instance.crawler_strategy = Mock()
+        mock_instance.crawler_strategy.set_hook = Mock()
+        
+        # Configure mock response
+        class MockResponse:
+            def __init__(self):
+                self.success = True
+                self.status_code = 200
+                self.markdown_v2 = type("Markdown", (object,), {"raw_markdown": "# Test"})()
+                self.html = "<html><body>Test content</body></html>"
+                self.links = mock_links
+
+        mock_instance.arun.return_value = MockResponse()
+        mock_instance.close = AsyncMock()
+        mock_crawler.return_value = mock_instance
+
+        # Run crawler with depth=1 to test link processing
+        urls = await crawl_recursive(
+            start_url, 
+            depth=1, 
+            strategy=CrawlStrategy.BFS,
+            caching_enabled=False
+        )
+
+        # Verify results
+        assert start_url in urls
+        assert len(urls) >= 1  # Should at least contain the start_url
+        
+        # Get all URLs that were attempted to be crawled
+        crawl_calls = [call.kwargs['url'] for call in mock_instance.arun.call_args_list]
+        
+        # Should include start_url
+        assert start_url in crawl_calls
+        
+        # Should include normalized internal links but not fragments or external domains
+        assert "https://example.com/docs/page1" in crawl_calls
+        assert "https://example.com/docs/page2" in crawl_calls
+        assert "https://example.com/docs/page2#section" not in crawl_calls  # Fragment should be removed
+        assert "https://different-domain.com/page" not in crawl_calls  # External domain should be skipped
+        
+        # Empty href should be skipped
+        assert "" not in crawl_calls
