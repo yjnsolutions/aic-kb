@@ -4,12 +4,11 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import List
-from aic_kb.pypi_doc_scraper.types import TitleAndSummary
 from urllib.parse import urlparse
 
 from litellm import acompletion, aembedding
 
-from aic_kb.pypi_doc_scraper.types import ProcessedChunk
+from aic_kb.pypi_doc_scraper.types import ProcessedChunk, TitleAndSummary
 
 logger = logging.getLogger(__name__)
 

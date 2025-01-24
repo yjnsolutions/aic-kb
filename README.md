@@ -15,10 +15,21 @@ uv sync
 
 ## Usage
 
-First, run database container (data is persisted on host)
+First, create a `.env` file from template and adjust values if needed:
 
 ```bash
-docker run --name aic-kb -p 127.0.0.1:5432:5432 --volume $PWD/data/postgres:/var/lib/postgresql/data -e POSTGRES_PASSWORD=mysecretpassword -d pgvector/pgvector:pg17
+cp .env.template .env
+```
+
+Then run database container (data is persisted on host):
+```bash
+docker run --name aic-kb \
+  -p 127.0.0.1:${POSTGRES_PORT}:5432 \
+  --volume $PWD/data/postgres:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=${POSTGRES_PASSWORD} \
+  -e POSTGRES_USER=${POSTGRES_USER} \
+  -e POSTGRES_DB=${POSTGRES_DB} \
+  -d pgvector/pgvector:pg17
 ```
 
 The package provides a CLI command `aic-kb`. Basic usage:
