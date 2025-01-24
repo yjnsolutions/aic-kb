@@ -332,7 +332,7 @@ async def test_crawl_url_caching(mock_db_connection_pool):
 async def test_link_processing(mock_db_connection_pool):
     """Test the link processing functionality in crawl_recursive"""
     start_url = "https://example.com/docs"
-    
+
     # Create mock links that include both internal and cross-domain links
     mock_links = {
         "internal": [
@@ -341,7 +341,7 @@ async def test_link_processing(mock_db_connection_pool):
             {"href": "https://example.com/docs/page2#section"},  # With fragment
             {"href": "https://different-domain.com/page"},  # External domain
             {"href": ""},  # Empty href
-            {"href": "https://example.com/docs"}  # Same as start_url
+            {"href": "https://example.com/docs"},  # Same as start_url
         ]
     }
 
@@ -358,7 +358,7 @@ async def test_link_processing(mock_db_connection_pool):
         mock_instance.arun = AsyncMock()
         mock_instance.crawler_strategy = Mock()
         mock_instance.crawler_strategy.set_hook = Mock()
-        
+
         # Configure mock response
         class MockResponse:
             def __init__(self):
@@ -373,28 +373,23 @@ async def test_link_processing(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         # Run crawler with depth=1 to test link processing
-        urls = await crawl_recursive(
-            start_url, 
-            depth=1, 
-            strategy=CrawlStrategy.BFS,
-            caching_enabled=False
-        )
+        urls = await crawl_recursive(start_url, depth=1, strategy=CrawlStrategy.BFS, caching_enabled=False)
 
         # Verify results
         assert start_url in urls
         assert len(urls) >= 1  # Should at least contain the start_url
-        
+
         # Get all URLs that were attempted to be crawled
-        crawl_calls = [call.kwargs['url'] for call in mock_instance.arun.call_args_list]
-        
+        crawl_calls = [call.kwargs["url"] for call in mock_instance.arun.call_args_list]
+
         # Should include start_url
         assert start_url in crawl_calls
-        
+
         # Should include normalized internal links but not fragments or external domains
         assert "https://example.com/docs/page1" in crawl_calls
         assert "https://example.com/docs/page2" in crawl_calls
         assert "https://example.com/docs/page2#section" not in crawl_calls  # Fragment should be removed
         assert "https://different-domain.com/page" not in crawl_calls  # External domain should be skipped
-        
+
         # Empty href should be skipped
         assert "" not in crawl_calls

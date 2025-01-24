@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, Mock, patch  # Removed 'patch.dict'
 import pytest
 
 from aic_kb.pypi_doc_scraper.crawl import process_and_store_document
-from aic_kb.pypi_doc_scraper.store import create_connection_pool  # Ensure this import is present
+from aic_kb.pypi_doc_scraper.store import (
+    create_connection_pool,  # Ensure this import is present
+)
 
 
 @pytest.fixture
@@ -103,12 +105,12 @@ async def test_database_initialization_when_table_does_not_exist():
     with patch("aic_kb.pypi_doc_scraper.store.create_pool", mock_create_pool):
         # Call the function under test
         pool = await create_connection_pool()
-        
+
         # Verify the returned pool is our mock
         assert pool == mock_pool
         mock_create_pool.assert_called_once()
         # Fix: Assert on mock_pool.acquire instead of mock_create_pool.acquire
         mock_pool.acquire.assert_called_once()
-        
+
         # Verify that fetchval was called to check if table exists
         mock_conn.fetchval.assert_called_once()
