@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from rich.progress import Progress
 
 from aic_kb.pypi_doc_scraper.crawl import process_and_store_document
 
@@ -44,9 +43,7 @@ async def test_process_and_store_document(mock_db_connection, mock_logger, tmp_p
     ):
         url = "https://example.com/docs/page"
         content = "# Test Content"
-        with Progress() as progress:
-            task_id = progress.add_task("Testing", total=1)
-            await process_and_store_document(url, content, progress, task_id, mock_db_connection, mock_logger)
+        await process_and_store_document(url, content, mock_db_connection, mock_logger)
 
         # Verify mock calls
         mock_completion.assert_called()
@@ -76,9 +73,7 @@ async def test_process_and_store_document_special_chars(mock_db_connection, mock
         # Test URL with special characters
         url = "https://example.com/docs/page?with=params#fragment"
         content = "# Test Content"
-        with Progress() as progress:
-            task_id = progress.add_task("Testing", total=1)
-            await process_and_store_document(url, content, progress, task_id, mock_db_connection, mock_logger)
+        await process_and_store_document(url, content, mock_db_connection, mock_logger)
 
         # Verify mock calls
         mock_completion.assert_called()

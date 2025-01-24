@@ -14,7 +14,13 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from playwright.async_api import BrowserContext, Page
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 from aic_kb.pypi_doc_scraper.store import create_connection, process_and_store_document
 
@@ -199,13 +205,6 @@ async def crawl_recursive(
             semaphore = asyncio.Semaphore(max_concurrent)
             logger.info(f"Set concurrency limit to {max_concurrent}")
 
-            from rich.progress import (
-                BarColumn,
-                MofNCompleteColumn,
-                TaskProgressColumn,
-                TextColumn,
-            )
-
             with Progress(
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
@@ -214,7 +213,7 @@ async def crawl_recursive(
             ) as progress:
                 setup_rich_logging(progress)
 
-                task_id = progress.add_task("[cyan]Crawling pages...", total=len(to_crawl))
+                task_id = progress.add_task("[cyan]Crawling pages...", total=1, completed=0)
 
                 # Setup signal handlers
                 signal.signal(signal.SIGINT, signal_handler)
@@ -284,11 +283,10 @@ async def crawl_recursive(
                             # Process document without semaphore
                             store_task = asyncio.create_task(
                                 process_and_store_document(
-                                    base_url, result.markdown_v2.raw_markdown, progress, task_id, connection, logger
+                                    base_url, result.markdown_v2.raw_markdown, connection, logger
                                 )
                             )
 
-                            progress.update(task_id, advance=1)
                             logger.info(f"Successfully crawled: {base_url} (redirect from {current_url})")
                             crawled_urls.add(base_url)
 
@@ -315,14 +313,14 @@ async def crawl_recursive(
                                 for i in range(0, len(result.links["internal"]), batch_size):
                                     batch = result.links["internal"][i : i + batch_size]
                                     await asyncio.gather(*[process_link(link) for link in batch])
-
                                 if new_urls > 0:
-                                    progress.update(task_id, total=len(to_crawl))
+                                    progress.update(task_id, total=len(crawled_urls) + len(to_crawl))
                                     logger.info(f"Found {new_urls} new internal links on {base_url}")
 
                             # Wait for document processing to complete
                             processed_chunks = await store_task
                             logger.info(f"Processed {len(processed_chunks)} chunks from {base_url}")
+                            progress.update(task_id, advance=1)
                         else:
                             logger.warning(f"No markdown content for {base_url}")
                             continue

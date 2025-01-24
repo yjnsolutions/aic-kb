@@ -1,14 +1,17 @@
+import asyncio
 import json
 import logging
 import re
 import urllib.parse
+from asyncio import Semaphore
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import asyncpg
-from rich.progress import Progress, TaskID
 
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
+
+from .extract import chunk_text
 
 
 async def ensure_db_initialized(connection: asyncpg.Connection):
@@ -51,27 +54,27 @@ async def create_connection():
 
 
 async def process_and_store_document(
-    url: str, content: str, progress: Progress, task_id: TaskID, connection: asyncpg.Connection, logger: logging.Logger
-) -> List[ProcessedChunk]:
+    url: str,
+    content: str,
+    connection: asyncpg.Connection,
+    logger: logging.Logger,
+    max_concurrent: int = 5,  # Default to 5 concurrent chunks
+) -> List[Optional[ProcessedChunk]]:
     """
     Store the scraped content in markdown files and process chunks for embeddings.
     Args:
         url: The URL of the scraped page
         content: The markdown content to store
-        progress: Rich progress bar instance
-        task_id: Task ID for updating progress
         connection: asyncpg Connection instance
-        :param logger: logger configured to log to Rich console
+        logger: logger configured to log to Rich console
+        max_concurrent: Maximum number of concurrent chunk processing tasks
     """
-
-    from .extract import chunk_text
+    # Create semaphore for controlling concurrency
+    sem = Semaphore(max_concurrent)
 
     # Create docs directory if it doesn't exist
     output_dir = Path("data/docs")
     output_dir.mkdir(exist_ok=True)
-
-    # Update description while processing
-    progress.update(task_id, description=f"[cyan]Processing: {url}")
 
     # Convert URL to filename
     parsed = urllib.parse.urlparse(url)
@@ -88,9 +91,7 @@ async def process_and_store_document(
 
     # Process chunks
     chunks = chunk_text(content)
-    processed_chunks = []
 
-    # Prepare insert statement
     insert_stmt = await connection.prepare(
         """
         INSERT INTO site_pages 
@@ -107,33 +108,38 @@ async def process_and_store_document(
     """
     )
 
-    for i, chunk in enumerate(chunks):
+    async def process_and_store_chunk(chunk: str, i: int) -> Optional[ProcessedChunk]:
         try:
-            processed_chunk = await process_chunk(chunk, i, url)
-            processed_chunks.append(processed_chunk)
+            # Use semaphore to limit concurrent processing
+            async with sem:
+                processed_chunk = await process_chunk(chunk, i, url)
 
-            # Insert into database
-            metadata = {
-                "filename": filename,
-                "original_path": str(output_path),
-            }
+                # Insert into database
+                metadata = {
+                    "filename": filename,
+                    "original_path": str(output_path),
+                }
 
-            # Serialize metadata to JSON string
-            metadata_json = json.dumps(metadata)
+                # Serialize metadata to JSON string
+                metadata_json = json.dumps(metadata)
 
-            await insert_stmt.fetchval(
-                url,
-                processed_chunk.chunk_number,
-                processed_chunk.title,
-                processed_chunk.summary,
-                processed_chunk.content,
-                metadata_json,
-                json.dumps(processed_chunk.embedding, separators=(",", ":")),
-            )
+                await insert_stmt.fetchval(
+                    url,
+                    processed_chunk.chunk_number,
+                    processed_chunk.title,
+                    processed_chunk.summary,
+                    processed_chunk.content,
+                    metadata_json,
+                    json.dumps(processed_chunk.embedding, separators=(",", ":")),
+                )
 
+                return processed_chunk
         except Exception as e:
             logger.error(f"Error processing chunk {i} from {url}: {e}")
-            continue
+            return None
 
-    progress.update(task_id, advance=1)
+    # Process all chunks with controlled concurrency
+    tasks = [process_and_store_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+    processed_chunks = await asyncio.gather(*tasks, return_exceptions=False)
+
     return processed_chunks
