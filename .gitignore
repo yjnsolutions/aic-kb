@@ -48,6 +48,7 @@ cover/
 Thumbs.db
 .aider*
 data/*
+!data/docs/.gitkeep
 .crawl_cache/*
 .title_and_summary_cache/
 .embedding_cache/
