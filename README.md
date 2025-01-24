@@ -1,5 +1,7 @@
 [![Tests Status](https://github.com/yorrick-org/aic-kb/actions/workflows/tests.yml/badge.svg)](https://github.com/yorrick-org/aic-kb/actions)
 
+ [![codecov](https://codecov.io/gh/yorrick-org/aic-kb/branch/main/graph/badge.svg)](https://codecov.io/gh/yorrick-org/aic-kb)    
+
 # AI Coding Knowledge Base
 
 Yorrick's tools and knowledge base for AI coding (with Aider).
@@ -56,5 +58,5 @@ docker exec -ti aic-kb psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 Run tests with:
 
 ```fish
-coverage run -m pytest -v tests/
+uv run pytest -v tests/
 ```
