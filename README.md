@@ -16,7 +16,7 @@ Data is crawled with Crawl4AI, then put in a local postgres database with embedd
 ```fish
 uv sync
 ```
-3. Install [direnv](https://direnv.net/docs/installation.html) and https://direnv.net/man/direnv.toml.1.html#codeloaddotenvcode to load the `.env` file.
+3. Install [direnv](https://direnv.net/docs/installation.html) and [configure this](https://direnv.net/man/direnv.toml.1.html#codeloaddotenvcode) to load the `.env` file.
 
 ## Usage
 
