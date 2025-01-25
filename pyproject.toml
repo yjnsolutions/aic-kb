@@ -29,6 +29,7 @@ dev = [
     "types-requests>=2.32.0.20241016",
     "pytest-cov>=4.1.0",
     "pyupgrade>=3.15.0",
+    "aider-chat==0.72.3",
 ]
 
 [tool.coverage.report]
