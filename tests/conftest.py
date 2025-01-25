@@ -15,6 +15,7 @@ async def mock_db_connection_pool():
 
     # Create mock pool
     mock_pool = AsyncMock()
+    mock_pool.connection = mock_conn
     mock_pool.acquire = Mock()
     # Make acquire() return the mock connection as a context manager
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
