@@ -81,7 +81,15 @@ async def test_process_and_store_document_special_chars(mock_db_connection_pool,
 
 
 @pytest.mark.asyncio
-async def test_database_initialization_when_table_does_not_exist():
+async def test_database_initialization_when_table_does_not_exist(monkeypatch):
+    monkeypatch.setenv("POSTGRES_USER", "postgres")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "somepassword")
+    monkeypatch.setenv("POSTGRES_DB", "postgres")
+    monkeypatch.setenv("POSTGRES_HOST", "localhost")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.setenv("POSTGRES_POOL_MIN_SIZE", "1")
+    monkeypatch.setenv("POSTGRES_POOL_MAX_SIZE", "2")
+
     mock_conn = AsyncMock()
     mock_conn.prepare = AsyncMock()
     mock_conn.prepare.return_value.fetchval = AsyncMock(return_value=1)  # Return dummy ID
