@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
