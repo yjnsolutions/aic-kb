@@ -4,10 +4,12 @@
 
 # AI Coding Knowledge Base
 
-Yorrick's tools and knowledge base for AI coding (with Aider).
-Crawler cli + documentation search API aimed at feeding agentic AI coding tools. 
 
-Data is crawled with Crawl4AI, then put in a local postgres database with embeddings.
+Web scraping tools + semantic search for AI coding agents.
+
+Note: this can be implemented AWS Kendra for automated crawling, chunking and indexing. Kendra will be tested in the future.
+
+Data is crawled with Crawl4AI, then put in a local postgres database with embeddings to support semantic search.
 
 ## Installation
 
@@ -40,7 +42,12 @@ docker run --name aic-kb \
 The package provides a CLI command `aic-kb`. Basic usage:
 
 ```fish
-aic-kb get-package-documentation requests --version 2.31.0 --limit 3
+aic-kb get-package-documentation requests --version 2.31.0
+aic-kb get-package-documentation typer
+aic-kb get-package-documentation rich
+
+# then, we can query the knowledge base with the `search` command
+aic-kb search 'make an POST with requests' --match-count 5
 ```
 
 
