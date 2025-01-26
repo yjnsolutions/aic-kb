@@ -414,8 +414,8 @@ async def _get_package_documentation(
     try:
         connection_pool = await create_connection_pool()
         tool_id = await store_tool_docs(
-            connection_pool,
-            documentation_url,
+            connection_pool=connection_pool,
+            tool_name=package_name,
             source_type=SourceType.official_package_documentation,
             root_url=documentation_url,
             metadata={
