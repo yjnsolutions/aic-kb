@@ -1,8 +1,6 @@
 -- Enable the pgvector extension
 create extension if not exists vector;
 
--- TODO add column model, model version, source
-
 -- Create the documentation chunks table
 create table openai_site_pages (
     id bigserial primary key,
@@ -11,6 +9,8 @@ create table openai_site_pages (
     title varchar not null,
     summary varchar not null,
     content text not null,
+    tool_name varchar not null,
+    source_type varchar not null,
     metadata jsonb not null default '{}'::jsonb,
     embedding vector(1536),
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -21,6 +21,8 @@ create table openai_site_pages (
 -- Create an index for better vector similarity search performance
 -- WARNING: You want at least 1000 vectors for an IVFFlat index to be effective, otherwise recall will be poor
 create index on openai_site_pages using ivfflat (embedding vector_cosine_ops);
+-- After re-creating the index, you need to reindex the table
+-- reindex index openai_site_pages_embedding_idx;
 
 -- Create an index on metadata for faster filtering
 create index idx_openai_site_pages_metadata on openai_site_pages using gin (metadata);

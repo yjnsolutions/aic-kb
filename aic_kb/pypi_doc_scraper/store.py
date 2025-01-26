@@ -14,6 +14,7 @@ from asyncpg import create_pool
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
 from .extract import chunk_text
+from .types import Document
 
 
 async def ensure_db_initialized(connection: asyncpg.Connection):
@@ -60,8 +61,7 @@ async def create_connection_pool() -> asyncpg.Pool:
 
 
 async def process_and_store_document(
-    url: str,
-    content: str,
+    document: Document,
     connection_pool: asyncpg.Pool,
     logger: logging.Logger,
     max_concurrent: int = 5,
@@ -76,7 +76,7 @@ async def process_and_store_document(
     output_dir.mkdir(exist_ok=True)
 
     # Convert URL to filename
-    parsed = urllib.parse.urlparse(url)
+    parsed = urllib.parse.urlparse(document.url)
     filename = re.sub(r"[^\w\-_]", "_", parsed.path + "_" + parsed.query + "_" + parsed.fragment).strip("_")
 
     # Remove leading and trailing underscores
@@ -86,15 +86,15 @@ async def process_and_store_document(
 
     # Save original content to file
     output_path = output_dir / f"{filename}.md"
-    output_path.write_text(content)
+    output_path.write_text(document.content)
 
     # Process chunks
-    chunks = chunk_text(content)
+    chunks = chunk_text(document.content)
 
     async def process_and_store_chunk(chunk: str, i: int) -> Optional[ProcessedChunk]:
         try:
             async with sem:
-                processed_chunk = await process_chunk(chunk, i, url, cache_enabled)
+                processed_chunk = await process_chunk(chunk, i, document.url, cache_enabled)
 
                 # Insert into database
                 metadata = {
@@ -109,13 +109,15 @@ async def process_and_store_document(
                     insert_stmt = await connection.prepare(
                         """
                         INSERT INTO openai_site_pages 
-                        (url, chunk_number, title, summary, content, metadata, embedding, updated_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, timezone('utc'::text, now()))
+                        (url, chunk_number, title, summary, content, source, source_type, metadata, embedding, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, timezone('utc'::text, now()))
                         ON CONFLICT (url, chunk_number) 
                         DO UPDATE SET
                             title = EXCLUDED.title,
                             summary = EXCLUDED.summary,
                             content = EXCLUDED.content,
+                            source = EXCLUDED.source,
+                            source_type = EXCLUDED.source_type,
                             metadata = EXCLUDED.metadata,
                             embedding = EXCLUDED.embedding,
                             updated_at = timezone('utc'::text, now())
@@ -124,18 +126,20 @@ async def process_and_store_document(
                     )
 
                     await insert_stmt.fetchval(
-                        url,
+                        document.url,
                         processed_chunk.chunk_number,
                         processed_chunk.title,
                         processed_chunk.summary,
                         processed_chunk.content,
+                        document.tool_name,
+                        document.source_type.value,  # Convert enum to string
                         metadata_json,
                         json.dumps(processed_chunk.embedding, separators=(",", ":")),
                     )
 
                 return processed_chunk
         except Exception as e:
-            logger.error(f"Error processing chunk {i} from {url}: {e}")
+            logger.error(f"Error processing chunk {i} from {document.url}: {e}")
             return None
 
     # Process all chunks with controlled concurrency

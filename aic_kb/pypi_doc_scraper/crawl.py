@@ -16,6 +16,8 @@ from crawl4ai import (
     CacheMode,
     CrawlerRunConfig,
     CrawlResult,
+    DefaultMarkdownGenerator,
+    PruningContentFilter,
 )
 from playwright.async_api import BrowserContext, Page
 from rich.console import Console
@@ -33,7 +35,7 @@ from aic_kb.pypi_doc_scraper.store import (
     process_and_store_document,
 )
 
-from .types import CrawlUrlResult
+from .types import CrawlUrlResult, Document, SourceType
 
 
 def setup_rich_logging(progress=None):
@@ -154,6 +156,7 @@ async def crawl_url(
 
 async def crawl_recursive(
     start_url: str,
+    tool_name: str,
     depth: Optional[int],
     strategy: CrawlStrategy,
     robot_parser: Optional[RobotFileParser] = None,
@@ -166,6 +169,7 @@ async def crawl_recursive(
 
     Args:
         start_url: Starting URL to crawl from
+        tool_name: Name of the tool/package we're fetching docs for
         depth: Maximum recursion depth (None for unlimited)
         strategy: BFS or DFS crawling strategy
         robot_parser: RobotFileParser instance for robots.txt rules
@@ -191,8 +195,28 @@ async def crawl_recursive(
             verbose=False,
             extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
         )
+
+        md_generator = DefaultMarkdownGenerator(
+            # If you don’t have a specific query, or if you just want a robust “junk remover,” use PruningContentFilter.
+            # It analyzes text density, link density, HTML structure, and known patterns (like “nav,” “footer”)
+            # to systematically prune extraneous or repetitive sections.
+            content_filter=PruningContentFilter(
+                threshold=0.5, threshold_type="dynamic", min_word_threshold=10  # or "dynamic"
+            ),
+            options={
+                "ignore_links": True,
+                "ignore_images": True,
+            },
+        )
+
         crawl_config = CrawlerRunConfig(
             cache_mode=CacheMode.BYPASS,
+            # we want to customize https://docs.crawl4ai.com/core/markdown-generation/ instead, this removes links entirely
+            # # Ignores text blocks under X words. Helps skip trivial blocks like short nav or disclaimers
+            # word_count_threshold=10,
+            # # Removes entire tags (<form>, <header>, <footer>, etc.)
+            # excluded_tags=["form", "header", "footer", "nav"],
+            markdown_generator=md_generator,
         )
 
         logger.debug("Initializing web crawler")
@@ -273,8 +297,12 @@ async def crawl_recursive(
                             # Process document without semaphore
                             store_task = asyncio.create_task(
                                 process_and_store_document(
-                                    base_url,
-                                    result.content,
+                                    Document(
+                                        url=base_url,
+                                        content=result.content,
+                                        tool_name=tool_name,
+                                        source_type=SourceType.official_package_documentation,
+                                    ),
                                     connection_pool,
                                     logger,
                                     cache_enabled=caching_enabled,
@@ -403,7 +431,13 @@ async def _get_package_documentation(
     logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
     try:
         await crawl_recursive(
-            documentation_url, depth, crawl_strat, robot_parser, limit=limit, caching_enabled=caching_enabled
+            documentation_url,
+            package_name,
+            depth,
+            crawl_strat,
+            robot_parser,
+            limit=limit,
+            caching_enabled=caching_enabled,
         )
     except Exception as e:
         logger.error(f"Error during documentation crawl: {str(e)}")
