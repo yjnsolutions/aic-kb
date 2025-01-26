@@ -35,6 +35,8 @@ create function match_site_pages (
 ) returns table (
   id bigint,
   url varchar,
+  tool_name varchar,
+  source_type varchar,
   chunk_number integer,
   title varchar,
   summary varchar,
@@ -50,6 +52,8 @@ begin
   select
     id,
     url,
+    tool_name,
+    source_type,
     chunk_number,
     title,
     summary,
