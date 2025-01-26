@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Python dependencies (pyproject.toml)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Pre-commit hooks (.pre-commit-config.yaml)
+  - package-ecosystem: "github_actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions workflows
+  - package-ecosystem: "github_actions"
+    directory: "/.github/workflows"
+    schedule:
+      interval: "monthly"
+
+  # Security updates (enabled by default but explicit is better)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-type: "security"
