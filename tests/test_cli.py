@@ -58,7 +58,9 @@ def test_get_package_documentation():
 
 def test_search_command_with_results(mock_db_connection_pool):
     async_mock_get_embedding = AsyncMock(return_value=[0.1] * 1536)
-    mock_db_connection_pool.connection.fetch = AsyncMock(
+    # Create a mock connection with fetch method
+    mock_connection = AsyncMock()
+    mock_connection.fetch = AsyncMock(
         return_value=[
             {
                 "title": "Test Title",
@@ -70,6 +72,12 @@ def test_search_command_with_results(mock_db_connection_pool):
             }
         ]
     )
+
+    # Set up the connection pool's context manager
+    mock_context = AsyncMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_connection)
+    mock_context.__aexit__ = AsyncMock(return_value=None)
+    mock_db_connection_pool.acquire = AsyncMock(return_value=mock_context)
 
     with (
         patch("aic_kb.search.search.get_embedding", async_mock_get_embedding),
@@ -86,7 +94,15 @@ def test_search_command_with_results(mock_db_connection_pool):
 
 def test_search_command_no_results(mock_db_connection_pool):
     async_mock_get_embedding = AsyncMock(return_value=[0.1] * 1536)
-    mock_db_connection_pool.connection.fetch = AsyncMock(return_value=[])
+    # Create a mock connection with fetch method
+    mock_connection = AsyncMock()
+    mock_connection.fetch = AsyncMock(return_value=[])
+
+    # Set up the connection pool's context manager
+    mock_context = AsyncMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_connection)
+    mock_context.__aexit__ = AsyncMock(return_value=None)
+    mock_db_connection_pool.acquire = AsyncMock(return_value=mock_context)
 
     with (
         patch("aic_kb.search.search.get_embedding", async_mock_get_embedding),
