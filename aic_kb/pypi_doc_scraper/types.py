@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
@@ -12,6 +13,17 @@ class CrawlUrlResult(BaseModel):
     content: Optional[str]
     final_url: str
     links: List[Dict] = []  # Default to empty list if no links
+
+
+class SourceType(str, Enum):
+    official_package_documentation = "official_package_documentation"
+
+
+class Document(BaseModel):
+    url: str
+    content: str
+    tool_name: str
+    source_type: SourceType
 
 
 class ProcessedChunk(BaseModel):
