@@ -4,7 +4,7 @@ from typing import Optional
 import typer
 from dotenv import load_dotenv
 
-from aic_kb.search.search import _search
+from aic_kb.search.search import run_rag_agent
 
 load_dotenv()
 app = typer.Typer()
@@ -39,14 +39,15 @@ def get_package_documentation(
 @app.command()
 def search(
     text: str,
-    match_count: int = typer.Option(5, help="Number of matches to return"),
+    match_count: int = typer.Option(3, help="Number of matches to return"),
 ):
     """
     Search the documentation database using semantic similarity.
 
     Returns the most relevant documentation chunks for the given search text.
     """
-    asyncio.run(_search(text, match_count))
+    asyncio.run(run_rag_agent(text, match_count))
+    # asyncio.run(_search(text, match_count))
 
 
 def main():
