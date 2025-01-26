@@ -10,7 +10,6 @@ from typing import Dict, List, Optional
 
 import asyncpg
 from asyncpg import Pool, create_pool
-from asyncpg.prepared_stmt import PreparedStatement
 
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
@@ -122,58 +121,63 @@ async def process_and_store_document(
     )
 
     async def store_chunk(
-        chunk_statement: PreparedStatement, processed_chunk: ProcessedChunk
+        connection_pool: asyncpg.Pool, page_id: int, processed_chunk: ProcessedChunk, logger: logging.Logger
     ) -> Optional[ProcessedChunk]:
         try:
-            await chunk_statement.fetchval(
-                page_id,
-                processed_chunk.chunk_number,
-                processed_chunk.title,
-                processed_chunk.summary,
-                processed_chunk.content,
-                json.dumps(processed_chunk.embedding, separators=(",", ":")),
-                json.dumps(processed_chunk.metadata, separators=(",", ":")),
-            )
+            async with connection_pool.acquire() as connection:
+                async with connection.transaction():
+                    # Create a new prepared statement for each chunk
+                    chunk_stmt = await connection.prepare(
+                        """
+                        INSERT INTO page_chunk 
+                        (page_id, chunk_number, title, summary, content, embedding, metadata, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, timezone('utc'::text, now()))
+                        ON CONFLICT (page_id, chunk_number)
+                        DO UPDATE SET
+                            title = EXCLUDED.title,
+                            summary = EXCLUDED.summary,
+                            content = EXCLUDED.content,
+                            embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata,
+                            updated_at = timezone('utc'::text, now())
+                        RETURNING id
+                        """
+                    )
 
+                    await chunk_stmt.fetchval(
+                        page_id,
+                        processed_chunk.chunk_number,
+                        processed_chunk.title,
+                        processed_chunk.summary,
+                        processed_chunk.content,
+                        json.dumps(processed_chunk.embedding, separators=(",", ":")),
+                        json.dumps(processed_chunk.metadata, separators=(",", ":")),
+                    )
+                logger.info(f"Stored chunk {processed_chunk.chunk_number} from {document.url}")
             return processed_chunk
         except Exception as e:
             logger.error(f"Error storing chunk {processed_chunk.chunk_number} from {document.url}: {e}")
             return None
 
     async with connection_pool.acquire() as connection:
-        # upsert page
-        page_stmt = await connection.prepare(
-            """
-            INSERT INTO page (tool_id, url, updated_at)
-            VALUES ($1, $2, timezone('utc'::text, now()))
-            ON CONFLICT (tool_id, url)
-            DO UPDATE SET
-                updated_at = timezone('utc'::text, now())
-            RETURNING id
-            """
-        )
+        # Start a transaction
+        async with connection.transaction():
+            # upsert page
+            page_stmt = await connection.prepare(
+                """
+                INSERT INTO page (tool_id, url, updated_at)
+                VALUES ($1, $2, timezone('utc'::text, now()))
+                ON CONFLICT (tool_id, url)
+                DO UPDATE SET
+                    updated_at = timezone('utc'::text, now())
+                RETURNING id
+                """
+            )
 
-        page_id = await page_stmt.fetchval(tool_id, document.url)
+            page_id = await page_stmt.fetchval(tool_id, document.url)
 
-        # prepare the chunk statement once
-        chunk_stmt = await connection.prepare(
-            """
-            INSERT INTO page_chunk 
-            (page_id, chunk_number, title, summary, content, embedding, metadata, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, timezone('utc'::text, now()))
-            ON CONFLICT (page_id, chunk_number)
-            DO UPDATE SET
-                title = EXCLUDED.title,
-                summary = EXCLUDED.summary,
-                content = EXCLUDED.content,
-                embedding = EXCLUDED.embedding,
-                metadata = EXCLUDED.metadata,
-                updated_at = timezone('utc'::text, now())
-            RETURNING id
-            """
-        )
-
-        tasks = [store_chunk(chunk_stmt, processed_chunk) for processed_chunk in processed_chunks]
-        stored_chunks = await asyncio.gather(*tasks, return_exceptions=False)
+    # Create tasks for storing chunks
+    tasks = [store_chunk(connection_pool, page_id, processed_chunk, logger) for processed_chunk in processed_chunks]
+    stored_chunks = await asyncio.gather(*tasks, return_exceptions=False)
 
     return stored_chunks
