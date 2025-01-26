@@ -8,6 +8,7 @@ from aic_kb.pypi_doc_scraper.crawl import process_and_store_document
 from aic_kb.pypi_doc_scraper.store import (
     create_connection_pool,  # Ensure this import is present
 )
+from aic_kb.pypi_doc_scraper.types import Document, SourceType
 
 
 @pytest.fixture
@@ -38,7 +39,17 @@ async def test_process_and_store_document(mock_db_connection_pool, mock_logger, 
         url = "https://example.com/docs/page"
         content = "# Test Content"
         # Pass cache_enabled=False to disable caching during test
-        await process_and_store_document(url, content, mock_db_connection_pool, mock_logger, cache_enabled=False)
+        await process_and_store_document(
+            Document(
+                url=url,
+                content=content,
+                tool_name="some-package",
+                source_type=SourceType.official_package_documentation,
+            ),
+            mock_db_connection_pool,
+            mock_logger,
+            cache_enabled=False,
+        )
 
         # Verify mock calls
         mock_completion.assert_called()
@@ -69,7 +80,17 @@ async def test_process_and_store_document_special_chars(mock_db_connection_pool,
         url = "https://example.com/docs/page?with=params#fragment"
         content = "# Test Content"
         # Pass cache_enabled=False to disable caching during test
-        await process_and_store_document(url, content, mock_db_connection_pool, mock_logger, cache_enabled=False)
+        await process_and_store_document(
+            Document(
+                url=url,
+                content=content,
+                tool_name="some-package",
+                source_type=SourceType.official_package_documentation,
+            ),
+            mock_db_connection_pool,
+            mock_logger,
+            cache_enabled=False,
+        )
 
         # Verify mock calls
         mock_completion.assert_called()

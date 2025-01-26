@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import os
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch, ANY
 from urllib.robotparser import RobotFileParser
 
 import pytest
@@ -16,6 +16,7 @@ from aic_kb.pypi_doc_scraper.crawl import (
     crawl_url,
 )
 from aic_kb.pypi_doc_scraper.store import process_and_store_document
+from aic_kb.pypi_doc_scraper.types import Document, SourceType
 
 
 @pytest.fixture
@@ -54,7 +55,14 @@ async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
         async def mock_crawl_with_content(*args, **kwargs):
             # Simulate processing content by calling process_and_store_document
             await process_and_store_document(
-                "https://docs.example.com", "# Test Content", mock_db_connection_pool, mock_logger
+                Document(
+                    url="https://docs.example.com",
+                    content="# Test Content",
+                    tool_name="some-package",
+                    source_type=SourceType.official_package_documentation,
+                ),
+                mock_db_connection_pool,
+                mock_logger,
             )
             return {"https://docs.example.com"}
 
@@ -74,7 +82,13 @@ async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
         # Verify mock calls
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
         mock_crawl.assert_called_once_with(
-            "https://docs.example.com", None, CrawlStrategy.BFS, None, limit=None, caching_enabled=False
+            "https://docs.example.com",
+            "requests",
+            None,
+            CrawlStrategy.BFS,
+            None,
+            limit=None,
+            caching_enabled=False,
         )
         mock_completion.assert_called()
         mock_embedding.assert_called()
@@ -120,7 +134,9 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
-        urls = await crawl_recursive(start_url, depth=None, strategy=CrawlStrategy.BFS, caching_enabled=False)
+        urls = await crawl_recursive(
+            start_url, "some-package", depth=None, strategy=CrawlStrategy.BFS, caching_enabled=False
+        )
         assert start_url in urls
 
         # Add verification of crawler calls
@@ -159,7 +175,9 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
-        urls = await crawl_recursive(start_url, depth=2, strategy=CrawlStrategy.BFS, caching_enabled=False)
+        urls = await crawl_recursive(
+            start_url, "some-package", depth=2, strategy=CrawlStrategy.BFS, caching_enabled=False
+        )
         assert start_url in urls
 
         # Verify mock calls
@@ -192,7 +210,9 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_instance.close = AsyncMock()
         mock_crawler.return_value = mock_instance
 
-        urls = await crawl_recursive(start_url, depth=2, strategy=CrawlStrategy.DFS, caching_enabled=False)
+        urls = await crawl_recursive(
+            start_url, "some-package", depth=2, strategy=CrawlStrategy.DFS, caching_enabled=False
+        )
         assert start_url in urls
 
         # Verify mock calls
@@ -243,14 +263,24 @@ async def test_robots_txt_handling(mock_db_connection_pool):
         # Test blocked URL
         blocked_url = "https://example.com/blocked"
         urls = await crawl_recursive(
-            blocked_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, caching_enabled=False
+            blocked_url,
+            "some-package",
+            depth=1,
+            strategy=CrawlStrategy.BFS,
+            robot_parser=robot_parser,
+            caching_enabled=False,
         )
         assert len(urls) == 0  # Should not crawl blocked URL
 
         # Test allowed URL
         allowed_url = "https://example.com/docs"
         urls = await crawl_recursive(
-            allowed_url, depth=1, strategy=CrawlStrategy.BFS, robot_parser=robot_parser, caching_enabled=False
+            allowed_url,
+            "some-package",
+            depth=1,
+            strategy=CrawlStrategy.BFS,
+            robot_parser=robot_parser,
+            caching_enabled=False,
         )
         assert len(urls) == 1  # Should crawl allowed URL
         assert mock_process_and_store_document.call_count > 0  # Should have called completion for content processing
@@ -373,7 +403,9 @@ async def test_link_processing(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         # Run crawler with depth=1 to test link processing
-        urls = await crawl_recursive(start_url, depth=1, strategy=CrawlStrategy.BFS, caching_enabled=False)
+        urls = await crawl_recursive(
+            start_url, "some-package", depth=1, strategy=CrawlStrategy.BFS, caching_enabled=False
+        )
 
         # Verify results
         assert start_url in urls
