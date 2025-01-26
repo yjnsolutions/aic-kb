@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import os
-from unittest.mock import AsyncMock, Mock, patch, ANY
+from unittest.mock import AsyncMock, Mock, patch
 from urllib.robotparser import RobotFileParser
 
 import pytest
