@@ -22,8 +22,6 @@ class SourceType(str, Enum):
 class Document(BaseModel):
     url: str
     content: str
-    tool_name: str
-    source_type: SourceType
 
 
 class ProcessedChunk(BaseModel):

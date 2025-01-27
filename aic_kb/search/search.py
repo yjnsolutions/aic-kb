@@ -67,7 +67,7 @@ async def retrieve_from_database(context: RunContext[Deps], search_query: str, m
     ]
 
 
-async def run_rag_agent(question: str, match_count: int):
+async def run_rag_agent(question: str):
     """Run the RAG agent on the given question."""
     print(f"Asking question: {question}")
 

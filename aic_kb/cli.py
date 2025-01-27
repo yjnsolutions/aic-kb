@@ -46,7 +46,7 @@ def search(
 
     Returns the most relevant documentation chunks for the given search text.
     """
-    asyncio.run(run_rag_agent(text, match_count))
+    asyncio.run(run_rag_agent(text))
     # asyncio.run(_search(text, match_count))
 
 

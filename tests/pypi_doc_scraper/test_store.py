@@ -42,6 +42,7 @@ async def test_process_and_store_document(mock_db_connection_pool, mock_logger, 
         await process_and_store_document(
             Document(
                 url=url,
+                root_url="https://example.com",
                 content=content,
                 tool_name="some-package",
                 source_type=SourceType.official_package_documentation,
@@ -83,6 +84,7 @@ async def test_process_and_store_document_special_chars(mock_db_connection_pool,
         await process_and_store_document(
             Document(
                 url=url,
+                root_url="https://example.com",
                 content=content,
                 tool_name="some-package",
                 source_type=SourceType.official_package_documentation,

@@ -57,6 +57,7 @@ async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
             await process_and_store_document(
                 Document(
                     url="https://docs.example.com",
+                    root_url="https://docs.example.com",
                     content="# Test Content",
                     tool_name="some-package",
                     source_type=SourceType.official_package_documentation,
@@ -135,7 +136,12 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         urls = await crawl_recursive(
-            start_url, "some-package", depth=None, strategy=CrawlStrategy.BFS, caching_enabled=False
+            root_url=start_url,
+            start_url=start_url,
+            tool_name="some-package",
+            depth=None,
+            strategy=CrawlStrategy.BFS,
+            caching_enabled=False,
         )
         assert start_url in urls
 
@@ -263,8 +269,9 @@ async def test_robots_txt_handling(mock_db_connection_pool):
         # Test blocked URL
         blocked_url = "https://example.com/blocked"
         urls = await crawl_recursive(
-            blocked_url,
-            "some-package",
+            root_url=blocked_url,
+            start_url=blocked_url,
+            tool_name="some-package",
             depth=1,
             strategy=CrawlStrategy.BFS,
             robot_parser=robot_parser,
@@ -275,8 +282,9 @@ async def test_robots_txt_handling(mock_db_connection_pool):
         # Test allowed URL
         allowed_url = "https://example.com/docs"
         urls = await crawl_recursive(
-            allowed_url,
-            "some-package",
+            root_url=allowed_url,
+            start_url=allowed_url,
+            tool_name="some-package",
             depth=1,
             strategy=CrawlStrategy.BFS,
             robot_parser=robot_parser,
@@ -404,7 +412,12 @@ async def test_link_processing(mock_db_connection_pool):
 
         # Run crawler with depth=1 to test link processing
         urls = await crawl_recursive(
-            start_url, "some-package", depth=1, strategy=CrawlStrategy.BFS, caching_enabled=False
+            root_url=start_url,
+            start_url=start_url,
+            tool_name="some-package",
+            depth=1,
+            strategy=CrawlStrategy.BFS,
+            caching_enabled=False,
         )
 
         # Verify results
