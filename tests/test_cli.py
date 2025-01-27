@@ -89,7 +89,7 @@ def test_search_command_with_results(mock_db_connection_pool):
         # Verify the embedding was requested
         async_mock_get_embedding.assert_called_once()
         # Verify database query was made
-        mock_db_connection_pool.acquire.assert_called_once()
+        mock_db_connection_pool.fetch.assert_called_once()
 
 
 def test_search_command_no_results(mock_db_connection_pool):
@@ -114,4 +114,4 @@ def test_search_command_no_results(mock_db_connection_pool):
         # Verify the embedding was requested
         async_mock_get_embedding.assert_called_once()
         # Verify database query was made
-        mock_db_connection_pool.acquire.assert_called_once()
+        mock_db_connection_pool.fetch.assert_called_once()
