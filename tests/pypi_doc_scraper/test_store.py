@@ -40,6 +40,7 @@ async def test_process_and_store_document(mock_db_connection_pool, mock_logger, 
         content = "# Test Content"
         # Pass cache_enabled=False to disable caching during test
         await process_and_store_document(
+            1,
             Document(
                 url=url,
                 root_url="https://example.com",
@@ -82,6 +83,7 @@ async def test_process_and_store_document_special_chars(mock_db_connection_pool,
         content = "# Test Content"
         # Pass cache_enabled=False to disable caching during test
         await process_and_store_document(
+            1,
             Document(
                 url=url,
                 root_url="https://example.com",

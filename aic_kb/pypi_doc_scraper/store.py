@@ -174,10 +174,9 @@ async def process_and_store_document(
                 """
             )
 
-            page_id = await page_stmt.fetchval(tool_id, document.url)
+            pid = await page_stmt.fetchval(tool_id, document.url)
 
-    # Create tasks for storing chunks
-    tasks = [store_chunk(connection_pool, page_id, processed_chunk, logger) for processed_chunk in processed_chunks]
-    stored_chunks = await asyncio.gather(*tasks, return_exceptions=False)
-
-    return stored_chunks
+        # Create tasks for storing chunks
+        tasks = [store_chunk(connection_pool, pid, processed_chunk, logger) for processed_chunk in processed_chunks]
+        stored_chunks = await asyncio.gather(*tasks, return_exceptions=False)
+        return stored_chunks
