@@ -1,40 +1,55 @@
-from dataclasses import dataclass
 from typing import List
 
 import asyncpg
 import pydantic_core
-from openai import BaseModel
 from pydantic_ai import Agent, RunContext
 
 from aic_kb.pypi_doc_scraper.extract import get_embedding
 from aic_kb.pypi_doc_scraper.store import create_connection_pool
+from aic_kb.search.types import Answer, Deps, SearchResult, ToolStats
+
+rag_agent = Agent(
+    model="openai:gpt-4o",
+    system_prompt="I am a bot that can help you find documentation for Python packages/tools. What would you like to know?",
+    result_type=Answer,
+    deps_type=Deps,
+)
 
 
-@dataclass
-class Deps:
-    pool: asyncpg.Pool
+async def load_tool_names(pool: asyncpg.Pool) -> List[ToolStats]:
+    """Load the names of all tools in the database."""
+    async with pool.acquire() as connection:
+        result = await connection.fetch(
+            """
+            select tool_name, source_type, td.url, count(*) as page_count 
+            from tool_docs td left outer join page p on p.tool_id = td.id 
+            group by tool_name, source_type, td.url
+            order by page_count desc
+        """
+        )
+        return [
+            ToolStats(
+                tool_name=row["tool_name"],
+                source_type=row["source_type"],
+                url=row["url"],
+                page_count=row["page_count"],
+            )
+            for row in result
+        ]
 
 
-class Answer(BaseModel):
-    content: str
-    reference_urls: List[str]
-
-
-rag_agent = Agent(model="openai:gpt-4o", result_type=Answer, deps_type=Deps)
-
-
-class SearchResult(BaseModel):
-    title: str
-    url: str
-    tool_name: str
-    source_type: str
-    summary: str
-    similarity: float
-    chunk_number: int
-    content: str
+@rag_agent.system_prompt
+async def add_available_tool_names(context: RunContext[Deps]) -> str:
+    """Add the names of all tools in the database to the context."""
+    tool_names = [
+        f"{tool.tool_name} ({tool.source_type}, {tool.page_count} pages from {tool.url})"
+        for tool in context.deps.tool_stats
+    ]
+    return f"Available tools: {', '.join(tool_names)}"
 
 
 @rag_agent.tool
+# TODO add tool name here to filter results
 async def retrieve_from_database(context: RunContext[Deps], search_query: str, match_count: int) -> List[SearchResult]:
     """Retrieve documentation sections based on a search query.
 
@@ -73,12 +88,14 @@ async def run_rag_agent(question: str):
 
     pool = await create_connection_pool()
     try:
-        deps = Deps(pool=pool)
+        deps = Deps(pool=pool, tool_stats=await load_tool_names(pool))
         run_result = await rag_agent.run(user_prompt=question, deps=deps)
         print(run_result.data.content)
-        print("======================")
+        print("=" * 80)
         for url in run_result.data.reference_urls:
             print(url)
+        print("=" * 80)
+        print(run_result.all_messages())
     finally:
         await pool.close()
 
