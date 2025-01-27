@@ -144,7 +144,7 @@ async def process_and_store_document(
                         """
                     )
 
-                    await chunk_stmt.fetchval(
+                    chunk_id = await chunk_stmt.fetchval(
                         page_id,
                         processed_chunk.chunk_number,
                         processed_chunk.title,
@@ -153,7 +153,9 @@ async def process_and_store_document(
                         json.dumps(processed_chunk.embedding, separators=(",", ":")),
                         json.dumps(processed_chunk.metadata, separators=(",", ":")),
                     )
-                logger.info(f"Stored chunk {processed_chunk.chunk_number} from {document.url}")
+                logger.info(
+                    f"Stored chunk {processed_chunk.chunk_number} (id={chunk_id}) from {document.url} (page={page_id})"
+                )
             return processed_chunk
         except Exception as e:
             logger.error(f"Error storing chunk {processed_chunk.chunk_number} from {document.url}: {e}")
