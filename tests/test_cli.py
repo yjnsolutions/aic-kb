@@ -3,6 +3,12 @@ from unittest.mock import AsyncMock, patch
 from typer.testing import CliRunner
 
 from aic_kb.cli import app
+from aic_kb.search.types import (
+    Answer,
+    KnowledgeBaseSearchResult,
+    StackOverflowSearchResult,
+    ToolStats,
+)
 
 runner = CliRunner()
 
@@ -57,61 +63,71 @@ def test_get_package_documentation():
 
 
 def test_search_command_with_results(mock_db_connection_pool):
-    async_mock_get_embedding = AsyncMock(return_value=[0.1] * 1536)
-    # Create a mock connection with fetch method
-    mock_connection = AsyncMock()
-    mock_connection.fetch = AsyncMock(
-        return_value=[
-            {
-                "title": "Test Title",
-                "url": "http://test.com",
-                "summary": "Test Summary",
-                "similarity": 0.95,
-                "chunk_number": 1,
-                "content": "Test Content",
-            }
-        ]
+    """Test search command when results are found"""
+    # Mock the tool stats
+    mock_tool_stats = [
+        ToolStats(tool_name="test-tool", source_type="readthedocs", url="http://test.com", page_count=10)
+    ]
+
+    # Mock the knowledge base results
+    mock_kb_results = [
+        KnowledgeBaseSearchResult(
+            title="Test Title",
+            source_url="http://test.com",
+            tool_name="test-tool",
+            source_type="readthedocs",
+            summary="Test Summary",
+            similarity=0.95,
+            chunk_number=1,
+            content="Test Content",
+        )
+    ]
+
+    # Mock Stack Overflow result
+    mock_so_result = StackOverflowSearchResult(
+        question="Test Question", accepted_answer="Test Answer", source_url="https://stackoverflow.com/q/123"
     )
 
-    # Set up the connection pool's context manager
-    mock_context = AsyncMock()
-    mock_context.__aenter__ = AsyncMock(return_value=mock_connection)
-    mock_context.__aexit__ = AsyncMock(return_value=None)
-    mock_db_connection_pool.acquire = AsyncMock(return_value=mock_context)
+    # Mock agent response
+    mock_answer = Answer(
+        content="Here's what I found...", reference_urls=["http://test.com", "https://stackoverflow.com/q/123"]
+    )
 
     with (
-        patch("aic_kb.search.search.get_embedding", async_mock_get_embedding),
+        patch("aic_kb.search.search.load_tool_names", AsyncMock(return_value=mock_tool_stats)),
+        patch("aic_kb.search.search.retrieve_from_knowledge_base", AsyncMock(return_value=mock_kb_results)),
+        patch("aic_kb.search.search.retrieve_from_stackoverflow", AsyncMock(return_value=mock_so_result)),
+        patch("aic_kb.search.search.rag_agent.run", AsyncMock(return_value=AsyncMock(data=mock_answer))),
         patch("aic_kb.search.search.create_connection_pool", return_value=mock_db_connection_pool),
     ):
         result = runner.invoke(app, ["search", "test query"])
         assert result.exit_code == 0
-
-        # Verify the embedding was requested
-        async_mock_get_embedding.assert_called_once()
-        # Verify database query was made
-        mock_db_connection_pool.fetch.assert_called_once()
+        assert "Here's what I found..." in result.stdout
 
 
 def test_search_command_no_results(mock_db_connection_pool):
-    async_mock_get_embedding = AsyncMock(return_value=[0.1] * 1536)
-    # Create a mock connection with fetch method
-    mock_connection = AsyncMock()
-    mock_connection.fetch = AsyncMock(return_value=[])
+    """Test search command when no results are found"""
+    # Mock the tool stats
+    mock_tool_stats = [
+        ToolStats(tool_name="test-tool", source_type="readthedocs", url="http://test.com", page_count=10)
+    ]
 
-    # Set up the connection pool's context manager
-    mock_context = AsyncMock()
-    mock_context.__aenter__ = AsyncMock(return_value=mock_connection)
-    mock_context.__aexit__ = AsyncMock(return_value=None)
-    mock_db_connection_pool.acquire = AsyncMock(return_value=mock_context)
+    # Mock empty knowledge base results
+    mock_kb_results = []
+
+    # Mock no Stack Overflow result
+    mock_so_result = None
+
+    # Mock agent response for no results
+    mock_answer = Answer(content="I couldn't find any relevant information.", reference_urls=[])
 
     with (
-        patch("aic_kb.search.search.get_embedding", async_mock_get_embedding),
+        patch("aic_kb.search.search.load_tool_names", AsyncMock(return_value=mock_tool_stats)),
+        patch("aic_kb.search.search.retrieve_from_knowledge_base", AsyncMock(return_value=mock_kb_results)),
+        patch("aic_kb.search.search.retrieve_from_stackoverflow", AsyncMock(return_value=mock_so_result)),
+        patch("aic_kb.search.search.rag_agent.run", AsyncMock(return_value=AsyncMock(data=mock_answer))),
         patch("aic_kb.search.search.create_connection_pool", return_value=mock_db_connection_pool),
     ):
         result = runner.invoke(app, ["search", "test query"])
         assert result.exit_code == 0
-
-        # Verify the embedding was requested
-        async_mock_get_embedding.assert_called_once()
-        # Verify database query was made
-        mock_db_connection_pool.fetch.assert_called_once()
+        assert "I couldn't find any relevant information." in result.stdout
