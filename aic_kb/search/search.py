@@ -15,10 +15,12 @@ from aic_kb.search.types import (
     ToolStats,
 )
 
+AGENT_MODEL = "openai:gpt-4o"
+
 rag_agent = Agent(
-    model="openai:gpt-4o",
+    model=AGENT_MODEL,
     system_prompt="""
-        You are a bot that can automated AI coding systems to find documentation for Python packages/tools. 
+        You are a bot that helps automated AI coding systems to find documentation for Python packages/tools. 
         As much as possible, give code examples extracted from the tool results, along with links to the source documentation.
         If you don't find the answer, tell us, be honest. 
     """,
