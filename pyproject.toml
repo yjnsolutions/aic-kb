@@ -15,6 +15,8 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "rich>=13.9.4",
     "typer>=0.15.1",
+    "html2text>=2024.2.26",
+    "nltk>=3.9.1",
 ]
 
 [dependency-groups]

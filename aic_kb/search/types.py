@@ -23,12 +23,18 @@ class Answer(BaseModel):
     reference_urls: List[str]
 
 
-class SearchResult(BaseModel):
+class KnowledgeBaseSearchResult(BaseModel):
     title: str
-    url: str
+    source_url: str
     tool_name: str
     source_type: str
     summary: str
     similarity: float
     chunk_number: int
     content: str
+
+
+class StackOverflowSearchResult(BaseModel):
+    question: str
+    accepted_answer: str
+    source_url: str
