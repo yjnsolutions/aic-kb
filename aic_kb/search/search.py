@@ -1,16 +1,27 @@
 from typing import List
 
+import aiohttp
 import asyncpg
 import pydantic_core
 from pydantic_ai import Agent, RunContext
 
 from aic_kb.pypi_doc_scraper.extract import get_embedding
 from aic_kb.pypi_doc_scraper.store import create_connection_pool
-from aic_kb.search.types import Answer, Deps, SearchResult, ToolStats
+from aic_kb.search.types import (
+    Answer,
+    Deps,
+    KnowledgeBaseSearchResult,
+    StackOverflowSearchResult,
+    ToolStats,
+)
 
 rag_agent = Agent(
     model="openai:gpt-4o",
-    system_prompt="I am a bot that can help you find documentation for Python packages/tools. What would you like to know?",
+    system_prompt="""
+        You are a bot that can automated AI coding systems to find documentation for Python packages/tools. 
+        As much as possible, give code examples extracted from the tool results, along with links to the source documentation.
+        If you don't find the answer, tell us, be honest. 
+    """,
     result_type=Answer,
     deps_type=Deps,
 )
@@ -49,8 +60,63 @@ async def add_available_tool_names(context: RunContext[Deps]) -> str:
 
 
 @rag_agent.tool
+async def retrieve_from_stackoverflow(context: RunContext[Deps], search_query: str) -> StackOverflowSearchResult | None:
+    """Get an answer from Stack Overflow."""
+
+    base_url = "https://api.stackexchange.com/2.3"
+
+    # Common parameters for all requests
+    common_params = {
+        "site": "stackoverflow",
+    }
+
+    async with aiohttp.ClientSession() as session:
+        # Step 1: Search for questions with accepted answers
+        search_params = {
+            **common_params,
+            "q": search_query,
+            "sort": "relevance",
+            "order": "desc",
+            "pagesize": "1",
+            "accepted": "true",
+        }
+
+        async with session.get(f"{base_url}/search/advanced", params=search_params) as resp:
+            search_data = await resp.json()
+
+            if not search_data.get("items"):
+                return None
+
+            first_result = search_data["items"][0]
+            question_id = first_result["question_id"]
+            answer_id = first_result["accepted_answer_id"]
+
+        # Step 2: Get the question details
+        question_params = {**common_params, "filter": "withbody"}  # Include the question body
+
+        async with session.get(f"{base_url}/questions/{question_id}", params=question_params) as resp:
+            question_data = await resp.json()
+            question_details = question_data["items"][0]
+
+        # Step 3: Get the accepted answer
+        answer_params = {**common_params, "filter": "withbody"}  # Include the answer body
+
+        async with session.get(f"{base_url}/answers/{answer_id}", params=answer_params) as resp:
+            answer_data = await resp.json()
+            answer_details = answer_data["items"][0]
+
+        return StackOverflowSearchResult(
+            question=question_details["title"],
+            accepted_answer=answer_details["body"],
+            source_url=f"https://stackoverflow.com/q/{question_id}",
+        )
+
+
+@rag_agent.tool
 # TODO add tool name here to filter results
-async def retrieve_from_database(context: RunContext[Deps], search_query: str, match_count: int) -> List[SearchResult]:
+async def retrieve_from_knowledge_base(
+    context: RunContext[Deps], search_query: str, match_count: int
+) -> List[KnowledgeBaseSearchResult]:
     """Retrieve documentation sections based on a search query.
 
     Args:
@@ -68,9 +134,9 @@ async def retrieve_from_database(context: RunContext[Deps], search_query: str, m
     )
 
     return [
-        SearchResult(
+        KnowledgeBaseSearchResult(
             title=row["title"],
-            url=row["url"],
+            source_url=row["url"],
             tool_name=row["tool_name"],
             source_type=row["source_type"],
             summary=row["summary"],
