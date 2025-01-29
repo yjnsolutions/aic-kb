@@ -61,8 +61,8 @@ async def add_available_tool_names(context: RunContext[Deps]) -> str:
     return f"Available tools: {', '.join(tool_names)}"
 
 
-@rag_agent.tool
-async def retrieve_from_stackoverflow(context: RunContext[Deps], search_query: str) -> StackOverflowSearchResult | None:
+@rag_agent.tool_plain
+async def retrieve_from_stackoverflow(search_query: str) -> StackOverflowSearchResult | None:
     """Get an answer from Stack Overflow."""
 
     base_url = "https://api.stackexchange.com/2.3"
