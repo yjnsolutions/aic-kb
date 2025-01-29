@@ -6,15 +6,15 @@ import re
 import urllib.parse
 from asyncio import Semaphore
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import asyncpg
-from asyncpg import create_pool
+from asyncpg import Pool, create_pool
 
 from aic_kb.pypi_doc_scraper.extract import ProcessedChunk, process_chunk
 
 from .extract import chunk_text
-from .types import Document
+from .types import Document, SourceType
 
 
 async def ensure_db_initialized(connection: asyncpg.Connection):
@@ -45,7 +45,7 @@ async def create_connection_pool() -> asyncpg.Pool:
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
                 WHERE table_schema = 'public' 
-                AND table_name = 'openai_site_pages'
+                AND table_name = 'tool_docs'
             );
             """
         )
@@ -60,16 +60,40 @@ async def create_connection_pool() -> asyncpg.Pool:
     return pool
 
 
+async def store_tool_docs(
+    connection_pool: Pool, tool_name: str, source_type: SourceType, root_url: str, metadata: Dict[str, str | None]
+) -> int:
+    async with connection_pool.acquire() as connection:
+        tool_docs_stmt = await connection.prepare(
+            """
+            INSERT INTO tool_docs (tool_name, source_type, url, updated_at, metadata)
+            VALUES ($1, $2, $3, timezone('utc'::text, now()), $4)
+            ON CONFLICT (tool_name, source_type, url)
+            DO UPDATE SET
+                updated_at = timezone('utc'::text, now()),
+                metadata = EXCLUDED.metadata
+            RETURNING id
+            """
+        )
+
+        tool_id = await tool_docs_stmt.fetchval(
+            tool_name, source_type.value, root_url, json.dumps(metadata)  # Using root_url from document
+        )
+        return tool_id
+
+
 async def process_and_store_document(
+    tool_id: int,
     document: Document,
     connection_pool: asyncpg.Pool,
     logger: logging.Logger,
     max_concurrent: int = 5,
     cache_enabled: bool = True,
 ) -> List[Optional[ProcessedChunk]]:
-    """Process and store document with caching support"""
-    # Create semaphore for controlling concurrency
-    sem = Semaphore(max_concurrent)
+    """
+    Process and store document with caching support.
+    Called for every document/url crawled.
+    """
 
     # Create docs directory if it doesn't exist
     output_dir = Path("data/docs")
@@ -90,60 +114,71 @@ async def process_and_store_document(
 
     # Process chunks
     chunks = chunk_text(document.content)
+    # Create semaphore for controlling concurrency for OpenAI API calls
+    sem = Semaphore(max_concurrent)
+    processed_chunks = await asyncio.gather(
+        *[process_chunk(sem, chunk, i, document.url, output_path, cache_enabled) for i, chunk in enumerate(chunks)]
+    )
 
-    async def process_and_store_chunk(chunk: str, i: int) -> Optional[ProcessedChunk]:
+    async def store_chunk(
+        connection_pool: asyncpg.Pool, page_id: int, processed_chunk: ProcessedChunk, logger: logging.Logger
+    ) -> Optional[ProcessedChunk]:
         try:
-            async with sem:
-                processed_chunk = await process_chunk(chunk, i, document.url, cache_enabled)
-
-                # Insert into database
-                metadata = {
-                    "filename": filename,
-                    "original_path": str(output_path),
-                }
-
-                # Serialize metadata to JSON string
-                metadata_json = json.dumps(metadata)
-
-                async with connection_pool.acquire() as connection:
-                    insert_stmt = await connection.prepare(
+            async with connection_pool.acquire() as connection:
+                async with connection.transaction():
+                    # Create a new prepared statement for each chunk
+                    chunk_stmt = await connection.prepare(
                         """
-                        INSERT INTO openai_site_pages 
-                        (url, chunk_number, title, summary, content, source, source_type, metadata, embedding, updated_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, timezone('utc'::text, now()))
-                        ON CONFLICT (url, chunk_number) 
+                        INSERT INTO page_chunk 
+                        (page_id, chunk_number, title, summary, content, embedding, metadata, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, timezone('utc'::text, now()))
+                        ON CONFLICT (page_id, chunk_number)
                         DO UPDATE SET
                             title = EXCLUDED.title,
                             summary = EXCLUDED.summary,
                             content = EXCLUDED.content,
-                            source = EXCLUDED.source,
-                            source_type = EXCLUDED.source_type,
-                            metadata = EXCLUDED.metadata,
                             embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata,
                             updated_at = timezone('utc'::text, now())
                         RETURNING id
-                    """
+                        """
                     )
 
-                    await insert_stmt.fetchval(
-                        document.url,
+                    chunk_id = await chunk_stmt.fetchval(
+                        page_id,
                         processed_chunk.chunk_number,
                         processed_chunk.title,
                         processed_chunk.summary,
                         processed_chunk.content,
-                        document.tool_name,
-                        document.source_type.value,  # Convert enum to string
-                        metadata_json,
                         json.dumps(processed_chunk.embedding, separators=(",", ":")),
+                        json.dumps(processed_chunk.metadata, separators=(",", ":")),
                     )
-
-                return processed_chunk
+                logger.info(
+                    f"Stored chunk {processed_chunk.chunk_number} (id={chunk_id}) from {document.url} (page={page_id})"
+                )
+            return processed_chunk
         except Exception as e:
-            logger.error(f"Error processing chunk {i} from {document.url}: {e}")
+            logger.error(f"Error storing chunk {processed_chunk.chunk_number} from {document.url}: {e}")
             return None
 
-    # Process all chunks with controlled concurrency
-    tasks = [process_and_store_chunk(chunk, i) for i, chunk in enumerate(chunks)]
-    processed_chunks = await asyncio.gather(*tasks, return_exceptions=False)
+    async with connection_pool.acquire() as connection:
+        # Start a transaction
+        async with connection.transaction():
+            # upsert page
+            page_stmt = await connection.prepare(
+                """
+                INSERT INTO page (tool_id, url, updated_at)
+                VALUES ($1, $2, timezone('utc'::text, now()))
+                ON CONFLICT (tool_id, url)
+                DO UPDATE SET
+                    updated_at = timezone('utc'::text, now())
+                RETURNING id
+                """
+            )
 
-    return processed_chunks
+            pid = await page_stmt.fetchval(tool_id, document.url)
+
+        # Create tasks for storing chunks
+        tasks = [store_chunk(connection_pool, pid, processed_chunk, logger) for processed_chunk in processed_chunks]
+        stored_chunks = await asyncio.gather(*tasks, return_exceptions=False)
+        return stored_chunks

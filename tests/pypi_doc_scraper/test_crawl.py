@@ -55,8 +55,10 @@ async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
         async def mock_crawl_with_content(*args, **kwargs):
             # Simulate processing content by calling process_and_store_document
             await process_and_store_document(
+                1,
                 Document(
                     url="https://docs.example.com",
+                    root_url="https://docs.example.com",
                     content="# Test Content",
                     tool_name="some-package",
                     source_type=SourceType.official_package_documentation,
@@ -82,8 +84,10 @@ async def test_get_package_documentation(mock_db_connection_pool, mock_logger):
         # Verify mock calls
         mock_get.assert_called_with("https://pypi.org/pypi/requests/json")
         mock_crawl.assert_called_once_with(
+            mock_db_connection_pool,
             "https://docs.example.com",
-            "requests",
+            1,
+            "https://docs.example.com",
             None,
             CrawlStrategy.BFS,
             None,
@@ -135,7 +139,13 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         urls = await crawl_recursive(
-            start_url, "some-package", depth=None, strategy=CrawlStrategy.BFS, caching_enabled=False
+            connection_pool=mock_db_connection_pool,
+            root_url=start_url,
+            tool_id=1,
+            start_url=start_url,
+            depth=None,
+            strategy=CrawlStrategy.BFS,
+            caching_enabled=False,
         )
         assert start_url in urls
 
@@ -176,7 +186,13 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         urls = await crawl_recursive(
-            start_url, "some-package", depth=2, strategy=CrawlStrategy.BFS, caching_enabled=False
+            connection_pool=mock_db_connection_pool,
+            root_url=start_url,
+            tool_id=1,
+            start_url=start_url,
+            depth=2,
+            strategy=CrawlStrategy.BFS,
+            caching_enabled=False,
         )
         assert start_url in urls
 
@@ -211,7 +227,13 @@ async def test_crawl_recursive(mock_db_connection_pool):
         mock_crawler.return_value = mock_instance
 
         urls = await crawl_recursive(
-            start_url, "some-package", depth=2, strategy=CrawlStrategy.DFS, caching_enabled=False
+            connection_pool=mock_db_connection_pool,
+            root_url=start_url,
+            tool_id=1,
+            start_url=start_url,
+            depth=2,
+            strategy=CrawlStrategy.DFS,
+            caching_enabled=False,
         )
         assert start_url in urls
 
@@ -263,8 +285,10 @@ async def test_robots_txt_handling(mock_db_connection_pool):
         # Test blocked URL
         blocked_url = "https://example.com/blocked"
         urls = await crawl_recursive(
-            blocked_url,
-            "some-package",
+            connection_pool=mock_db_connection_pool,
+            root_url=blocked_url,
+            tool_id=1,
+            start_url=blocked_url,
             depth=1,
             strategy=CrawlStrategy.BFS,
             robot_parser=robot_parser,
@@ -275,8 +299,10 @@ async def test_robots_txt_handling(mock_db_connection_pool):
         # Test allowed URL
         allowed_url = "https://example.com/docs"
         urls = await crawl_recursive(
-            allowed_url,
-            "some-package",
+            connection_pool=mock_db_connection_pool,
+            root_url=allowed_url,
+            tool_id=1,
+            start_url=allowed_url,
             depth=1,
             strategy=CrawlStrategy.BFS,
             robot_parser=robot_parser,
@@ -404,7 +430,13 @@ async def test_link_processing(mock_db_connection_pool):
 
         # Run crawler with depth=1 to test link processing
         urls = await crawl_recursive(
-            start_url, "some-package", depth=1, strategy=CrawlStrategy.BFS, caching_enabled=False
+            connection_pool=mock_db_connection_pool,
+            root_url=start_url,
+            tool_id=1,
+            start_url=start_url,
+            depth=1,
+            strategy=CrawlStrategy.BFS,
+            caching_enabled=False,
         )
 
         # Verify results

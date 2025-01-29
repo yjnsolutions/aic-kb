@@ -3,9 +3,11 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List
 from urllib.parse import urlparse
 
+from anyio import Semaphore
 from litellm import acompletion, aembedding
 
 from aic_kb.pypi_doc_scraper.types import ProcessedChunk, TitleAndSummary
@@ -155,13 +157,17 @@ async def get_embedding(text: str, cache_enabled: bool = True) -> List[float]:
         return [0] * 1536  # Return zero vector on error
 
 
-async def process_chunk(chunk: str, chunk_number: int, url: str, cache_enabled: bool = True) -> ProcessedChunk:
+async def process_chunk(
+    semaphore: Semaphore, chunk: str, chunk_number: int, url: str, output_path: Path, cache_enabled: bool = True
+) -> ProcessedChunk:
     """Process a single chunk of text."""
-    # Get title and summary
-    extracted = await get_title_and_summary(chunk, url, cache_enabled)
 
-    # Get embedding
-    embedding = await get_embedding(chunk, cache_enabled)
+    async with semaphore:
+        # Get title and summary
+        extracted = await get_title_and_summary(chunk, url, cache_enabled)
+
+        # Get embedding
+        embedding = await get_embedding(chunk, cache_enabled)
 
     # Create metadata
     metadata = {
@@ -169,6 +175,7 @@ async def process_chunk(chunk: str, chunk_number: int, url: str, cache_enabled: 
         "chunk_size": len(chunk),
         "crawled_at": datetime.now(timezone.utc).isoformat(),
         "url_path": urlparse(url).path,
+        "file_path": str(output_path),
     }
 
     return ProcessedChunk(

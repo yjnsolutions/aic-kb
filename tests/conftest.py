@@ -3,6 +3,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def mock_openai_key(monkeypatch):
+    """Automatically set OPENAI_API_KEY for all tests"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+
 @pytest.fixture
 async def mock_db_connection_pool():
     """Create a mock asyncpg connection pool for testing"""

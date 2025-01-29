@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
+from asyncpg import Pool
 from crawl4ai import (
     AsyncWebCrawler,
     BrowserConfig,
@@ -33,6 +34,7 @@ from rich.progress import (
 from aic_kb.pypi_doc_scraper.store import (
     create_connection_pool,
     process_and_store_document,
+    store_tool_docs,
 )
 
 from .types import CrawlUrlResult, Document, SourceType
@@ -155,8 +157,10 @@ async def crawl_url(
 
 
 async def crawl_recursive(
+    connection_pool: Pool,
+    root_url: str,
+    tool_id: int,
     start_url: str,
-    tool_name: str,
     depth: Optional[int],
     strategy: CrawlStrategy,
     robot_parser: Optional[RobotFileParser] = None,
@@ -169,7 +173,6 @@ async def crawl_recursive(
 
     Args:
         start_url: Starting URL to crawl from
-        tool_name: Name of the tool/package we're fetching docs for
         depth: Maximum recursion depth (None for unlimited)
         strategy: BFS or DFS crawling strategy
         robot_parser: RobotFileParser instance for robots.txt rules
@@ -179,9 +182,6 @@ async def crawl_recursive(
     Returns:
         Set of successfully crawled URLs
     """
-    # Create database connection pool
-    connection_pool = await create_connection_pool()
-
     try:
         logger.info(
             f"Starting recursive crawl of {start_url} with "
@@ -297,14 +297,13 @@ async def crawl_recursive(
                             # Process document without semaphore
                             store_task = asyncio.create_task(
                                 process_and_store_document(
-                                    Document(
+                                    tool_id=tool_id,
+                                    document=Document(
                                         url=base_url,
                                         content=result.content,
-                                        tool_name=tool_name,
-                                        source_type=SourceType.official_package_documentation,
                                     ),
-                                    connection_pool,
-                                    logger,
+                                    connection_pool=connection_pool,
+                                    logger=logger,
                                     cache_enabled=caching_enabled,
                                 )
                             )
@@ -412,27 +411,46 @@ async def _get_package_documentation(
 
     logger.info(f"Documentation URL: {documentation_url}")
 
-    # Set up robots.txt parser
-    robot_parser = None
-    if not ignore_robots:
-        robot_parser = RobotFileParser()
-        robots_url = urljoin(documentation_url, "/robots.txt")
-        logger.debug(f"Checking robots.txt at {robots_url}")
-        robot_parser.set_url(robots_url)
-        try:
-            robot_parser.read()
-            logger.info("Successfully read robots.txt")
-        except Exception as e:
-            logger.warning(f"Could not read robots.txt: {e}")
-            robot_parser = None
-
-    # Run recursive crawler
-    crawl_strat = CrawlStrategy.BFS if strategy.lower() == "bfs" else CrawlStrategy.DFS
-    logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
     try:
+        connection_pool = await create_connection_pool()
+        tool_id = await store_tool_docs(
+            connection_pool=connection_pool,
+            tool_name=package_name,
+            source_type=SourceType.official_package_documentation,
+            root_url=documentation_url,
+            metadata={
+                "version": version,
+                "depth": str(depth) if depth else None,
+                "strategy": strategy,
+                "ignore_robots": "true" if ignore_robots else "false",
+                "limit": str(limit) if limit else None,
+                "caching_enabled": "true" if caching_enabled else "false",
+            },
+        )
+
+        # Set up robots.txt parser
+        robot_parser = None
+        if not ignore_robots:
+            robot_parser = RobotFileParser()
+            robots_url = urljoin(documentation_url, "/robots.txt")
+            logger.debug(f"Checking robots.txt at {robots_url}")
+            robot_parser.set_url(robots_url)
+            try:
+                robot_parser.read()
+                logger.info("Successfully read robots.txt")
+            except Exception as e:
+                logger.warning(f"Could not read robots.txt: {e}")
+                robot_parser = None
+
+        # Run recursive crawler
+        crawl_strat = CrawlStrategy.BFS if strategy.lower() == "bfs" else CrawlStrategy.DFS
+        logger.info(f"Starting crawl with strategy: {crawl_strat.value}")
+
         await crawl_recursive(
+            connection_pool,
             documentation_url,
-            package_name,
+            tool_id,
+            documentation_url,
             depth,
             crawl_strat,
             robot_parser,
@@ -444,5 +462,7 @@ async def _get_package_documentation(
         if not shutdown_event.is_set():
             raise
     finally:
+        await connection_pool.close()
+
         if shutdown_event.is_set():
             logger.info("Package documentation crawl interrupted by user")
