@@ -1,2 +1,0 @@
-<AsyncMock id='4539312576'>
-<class 'unittest.mock.AsyncMock'>
